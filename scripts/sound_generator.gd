@@ -96,3 +96,49 @@ static func create_sound_win(sample_rate: int = 22050) -> AudioStreamWAV:
 	stream.stereo = false
 	stream.data = pcm_bytes
 	return stream
+
+static func create_sound_wolf(sample_rate: int = 22050) -> AudioStreamWAV:
+	var duration = 0.60
+	var num_samples = int(sample_rate * duration)
+	var pcm_bytes = PackedByteArray()
+	pcm_bytes.resize(num_samples * 2)
+
+	for i in range(num_samples):
+		var t = float(i) / sample_rate
+		var freq = 200.0 + (t / 0.3) * 250.0 if t < 0.3 else 450.0 - ((t - 0.3) / 0.3) * 200.0
+		var env = pow(sin(PI * (t / duration)), 0.8)
+		var vibrato = sin(2.0 * PI * 8.0 * t) * 0.15
+		var wave = sin(2.0 * PI * (freq + vibrato * 50.0) * t)
+		var clamped = clamp(wave * env * 0.50, -1.0, 1.0)
+		var int_val = int(clamped * 32767.0)
+		pcm_bytes.encode_s16(i * 2, int_val)
+
+	var stream = AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = sample_rate
+	stream.stereo = false
+	stream.data = pcm_bytes
+	return stream
+
+static func create_sound_caught(sample_rate: int = 22050) -> AudioStreamWAV:
+	var duration = 0.40
+	var num_samples = int(sample_rate * duration)
+	var pcm_bytes = PackedByteArray()
+	pcm_bytes.resize(num_samples * 2)
+
+	for i in range(num_samples):
+		var t = float(i) / sample_rate
+		var freq = 300.0 - (t / duration) * 180.0
+		var env = exp(-6.0 * t)
+		var sine = sin(2.0 * PI * freq * t)
+		var saw = (2.0 * (t * freq - floor(0.5 + t * freq))) * 0.5
+		var clamped = clamp((sine * 0.6 + saw * 0.4) * env * 0.5, -1.0, 1.0)
+		var int_val = int(clamped * 32767.0)
+		pcm_bytes.encode_s16(i * 2, int_val)
+
+	var stream = AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = sample_rate
+	stream.stereo = false
+	stream.data = pcm_bytes
+	return stream

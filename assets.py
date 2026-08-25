@@ -137,7 +137,80 @@ def create_sound_win(sample_rate: int = 22050) -> pygame.mixer.Sound | None:
         return None
 
 
+def create_sound_wolf(sample_rate: int = 22050) -> pygame.mixer.Sound | None:
+    """生成大灰狼出现的狼嚎/紧急提示音 (Pitch slide Wolf Howl)。"""
+    try:
+        duration = 0.60
+        num_samples = int(sample_rate * duration)
+        samples = []
+        for i in range(num_samples):
+            t = i / sample_rate
+            if t < 0.3:
+                freq = 200.0 + (t / 0.3) * 250.0
+            else:
+                freq = 450.0 - ((t - 0.3) / 0.3) * 200.0
+
+            env = math.sin(math.pi * (t / duration)) ** 0.8
+            vibrato = math.sin(2.0 * math.pi * 8.0 * t) * 0.15
+            wave = math.sin(2.0 * math.pi * (freq + vibrato * 50.0) * t)
+            samples.append(wave * env * 0.50)
+
+        wav_bytes = _generate_wav_bytes(samples, sample_rate)
+        import io
+        return pygame.mixer.Sound(io.BytesIO(wav_bytes))
+    except Exception as e:
+        print(f"Warning: Failed to create wolf sound: {e}")
+        return None
+
+
+def create_sound_caught(sample_rate: int = 22050) -> pygame.mixer.Sound | None:
+    """生成被大灰狼追上的提示音。"""
+    try:
+        duration = 0.40
+        num_samples = int(sample_rate * duration)
+        samples = []
+        for i in range(num_samples):
+            t = i / sample_rate
+            freq = 300.0 - (t / duration) * 180.0
+            env = math.exp(-6.0 * t)
+            sine = math.sin(2.0 * math.pi * freq * t)
+            saw = (2.0 * (t * freq - math.floor(0.5 + t * freq))) * 0.5
+            samples.append((sine * 0.6 + saw * 0.4) * env * 0.5)
+
+        wav_bytes = _generate_wav_bytes(samples, sample_rate)
+        import io
+        return pygame.mixer.Sound(io.BytesIO(wav_bytes))
+    except Exception as e:
+        print(f"Warning: Failed to create caught sound: {e}")
+        return None
+
+
 # --- 2. 程序化图形绘制 (Graphics / Sprites Generator) ---
+
+def create_tree_surface(size: int = 128) -> pygame.Surface:
+    """生成起点小树 Surface (深棕树干 + 茂密森林绿树冠 + 红苹果点缀)。"""
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    s = size
+
+    # 树干
+    trunk = pygame.Rect(int(s * 0.40), int(s * 0.55), int(s * 0.20), int(s * 0.38))
+    pygame.draw.rect(surf, (120, 75, 40), trunk, border_radius=int(s * 0.03))
+    pygame.draw.rect(surf, (80, 48, 25), trunk, width=int(s * 0.03), border_radius=int(s * 0.03))
+
+    # 树冠 (圆润茂密三重叶)
+    pygame.draw.circle(surf, (30, 140, 50), (int(s * 0.50), int(s * 0.38)), int(s * 0.28))
+    pygame.draw.circle(surf, (45, 165, 65), (int(s * 0.34), int(s * 0.42)), int(s * 0.22))
+    pygame.draw.circle(surf, (45, 165, 65), (int(s * 0.66), int(s * 0.42)), int(s * 0.22))
+    # 顶部亮绿高光
+    pygame.draw.circle(surf, (80, 200, 95), (int(s * 0.45), int(s * 0.28)), int(s * 0.16))
+
+    # 可爱红色果实
+    for fx, fy in ((0.36, 0.38), (0.62, 0.32), (0.48, 0.48)):
+        pygame.draw.circle(surf, (230, 55, 55), (int(s * fx), int(s * fy)), int(s * 0.055))
+        pygame.draw.circle(surf, (255, 200, 200), (int(s * fx - 0.015), int(s * fy - 0.015)), int(s * 0.02))
+
+    return surf
+
 
 def create_house_surface(size: int = 128) -> pygame.Surface:
     """生成入口小房子 Surface。"""
@@ -212,11 +285,12 @@ def create_flag_surface(size: int = 128) -> pygame.Surface:
 
 import os
 
-def create_player_sprites(size: int = 128) -> dict[str, list[pygame.Surface]]:
-    """生成或加载大头萌系角色的 4 个方向，每个方向 2 帧走动动画的 Surface。"""
-    frames_dir = os.path.join(os.path.dirname(__file__), "assets", "mochi_frames")
+def load_player_skin(skin_name: str = "red_hood", size: int = 128) -> dict[str, list[pygame.Surface]]:
+    """根据皮肤名称 ("red_hood" 或 "mochi") 加载玩家角色的 4 方向走动动画 Surface。"""
+    folder_name = "red_hood_frames" if skin_name == "red_hood" else "mochi_frames"
+    frames_dir = os.path.join(os.path.dirname(__file__), "assets", folder_name)
     if not os.path.exists(frames_dir):
-        frames_dir = "assets/mochi_frames"
+        frames_dir = f"assets/{folder_name}"
 
     if os.path.exists(frames_dir):
         try:
@@ -236,16 +310,55 @@ def create_player_sprites(size: int = 128) -> dict[str, list[pygame.Surface]]:
             if len(sprites) == 4:
                 return sprites
         except Exception as e:
-            print(f"Warning: Failed to load mochi frames: {e}")
+            print(f"Warning: Failed to load {folder_name}: {e}")
 
     sprites = {}
     directions = ["down", "up", "left", "right"]
-
     for d in directions:
         sprites[d] = [
             _draw_cute_character(size, d, frame=0),
             _draw_cute_character(size, d, frame=1),
         ]
+    return sprites
+
+
+def create_player_sprites(size: int = 128, skin_name: str = "red_hood") -> dict[str, list[pygame.Surface]]:
+    return load_player_skin(skin_name, size)
+
+
+def load_all_player_skins(size: int = 128) -> dict[str, dict[str, list[pygame.Surface]]]:
+    return {
+        "red_hood": load_player_skin("red_hood", size),
+        "mochi": load_player_skin("mochi", size),
+    }
+
+
+def create_wolf_sprites(size: int = 128) -> dict[str, list[pygame.Surface]]:
+    """加载大灰狼角色的 4 个方向走动贴图及哭泣/趴地贴图 (cry_0, cry_1)。"""
+    frames_dir = os.path.join(os.path.dirname(__file__), "assets", "wolf_frames")
+    if not os.path.exists(frames_dir):
+        frames_dir = "assets/wolf_frames"
+
+    sprites: dict[str, list[pygame.Surface]] = {}
+    if os.path.exists(frames_dir):
+        try:
+            # 4 方向走动动画
+            for d in ["down", "up", "left", "right", "cry"]:
+                frame_list = []
+                for idx in ["0", "1"]:
+                    path = os.path.join(frames_dir, f"{d}_{idx}.png")
+                    if os.path.exists(path):
+                        img = pygame.image.load(path)
+                        if pygame.display.get_surface() is not None:
+                            img = img.convert_alpha()
+                        scaled = pygame.transform.smoothscale(img, (size, size))
+                        frame_list.append(scaled)
+                if frame_list:
+                    sprites[d] = frame_list
+            if len(sprites) >= 4:
+                return sprites
+        except Exception as e:
+            print(f"Warning: Failed to load wolf frames: {e}")
 
     return sprites
 

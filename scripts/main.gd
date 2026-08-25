@@ -30,28 +30,80 @@ const COLOR_HUD_BG = Color(0.05, 0.07, 0.10, 0.95)
 var audio_step_player: AudioStreamPlayer = null
 var audio_start_player: AudioStreamPlayer = null
 var audio_win_player: AudioStreamPlayer = null
+var audio_wolf_player: AudioStreamPlayer = null
+var audio_caught_player: AudioStreamPlayer = null
+
 var player_tex: Texture2D = null
 var mochi_textures: Dictionary = {}
+var wolf_textures: Dictionary = {}
+var player_skins: Dictionary = {}
+var skin_list: Array = ["red_hood", "mochi"]
+var current_skin_idx: int = 0
+
+# 大灰狼角色与追赶逻辑
+var wolf_active: bool = false
+var caught_by_wolf: bool = false
+var wolf_pos: Vector2 = Vector2.ZERO
+var wolf_facing: String = "down"
+var wolf_anim_frame: int = 0
+var wolf_step_timer: float = 0.0
+var wolf_trail: Array = []
+var wolf_crying: bool = false
+var wolf_speed: float = 90.0
+
+# 计时器与最佳纪录
+var timer_started: bool = false
+var start_time_msec: int = 0
+var current_time_sec: float = 0.0
+var best_records: Dictionary = {}
 
 # UI Label
 @onready var hud_label: Label = $CanvasLayer/HUDMargin/HUDLabel
 @onready var win_banner: Control = $CanvasLayer/WinBanner
+@onready var win_label: Label = $CanvasLayer/WinBanner/WinLabel
 
 func _ready() -> void:
-	# 优先尝试加载 4 方向多帧精灵序列图 (down, up, left, right)
-	for d in ["down", "up", "left", "right"]:
-		var frames_arr: Array = []
-		for f_name in [d + "_0", d + "_1", d + "_idle"]:
-			var path_res = "res://assets/mochi_frames/%s.png" % f_name
-			var path_fs = "assets/mochi_frames/%s.png" % f_name
+	_load_best_records()
+
+	# 优先尝试加载小红帽 / 糯米团子 4 方向多帧精灵序列图 (red_hood_frames, mochi_frames)
+	for skin_name in ["red_hood", "mochi"]:
+		var folder_name = "red_hood_frames" if skin_name == "red_hood" else "mochi_frames"
+		var skin_dict: Dictionary = {}
+		for d in ["down", "up", "left", "right"]:
+			var frames_arr: Array = []
+			for f_name in [d + "_0", d + "_1", d + "_idle"]:
+				var path_res = "res://assets/%s/%s.png" % [folder_name, f_name]
+				var path_fs = "assets/%s/%s.png" % [folder_name, f_name]
+				if ResourceLoader.exists(path_res):
+					frames_arr.append(load(path_res))
+				elif FileAccess.file_exists(path_fs):
+					var img = Image.load_from_file(path_fs)
+					if img != null:
+						frames_arr.append(ImageTexture.create_from_image(img))
+			if frames_arr.size() > 0:
+				skin_dict[d] = frames_arr
+		if skin_dict.size() > 0:
+			player_skins[skin_name] = skin_dict
+
+	if player_skins.has("red_hood"):
+		mochi_textures = player_skins["red_hood"]
+	elif player_skins.has("mochi"):
+		mochi_textures = player_skins["mochi"]
+
+	# 加载大灰狼贴图帧 (down, up, left, right, cry)
+	for d in ["down", "up", "left", "right", "cry"]:
+		var w_frames: Array = []
+		for f_idx in ["0", "1"]:
+			var path_res = "res://assets/wolf_frames/%s_%s.png" % [d, f_idx]
+			var path_fs = "assets/wolf_frames/%s_%s.png" % [d, f_idx]
 			if ResourceLoader.exists(path_res):
-				frames_arr.append(load(path_res))
+				w_frames.append(load(path_res))
 			elif FileAccess.file_exists(path_fs):
 				var img = Image.load_from_file(path_fs)
 				if img != null:
-					frames_arr.append(ImageTexture.create_from_image(img))
-		if frames_arr.size() > 0:
-			mochi_textures[d] = frames_arr
+					w_frames.append(ImageTexture.create_from_image(img))
+		if w_frames.size() > 0:
+			wolf_textures[d] = w_frames
 
 	# 备用：加载单图
 	if ResourceLoader.exists("res://assets/player_mochi.png"):
@@ -74,6 +126,14 @@ func _ready() -> void:
 	audio_win_player.stream = SoundGenerator.create_sound_win()
 	add_child(audio_win_player)
 
+	audio_wolf_player = AudioStreamPlayer.new()
+	audio_wolf_player.stream = SoundGenerator.create_sound_wolf()
+	add_child(audio_wolf_player)
+
+	audio_caught_player = AudioStreamPlayer.new()
+	audio_caught_player.stream = SoundGenerator.create_sound_caught()
+	add_child(audio_caught_player)
+
 	player = MazePlayer.new()
 	add_child(player)
 	player.connect("step_taken", Callable(self, "_on_player_step"))
@@ -83,6 +143,13 @@ func _ready() -> void:
 func _start_new_game(level: int) -> void:
 	difficulty_level = level
 	won = false
+	caught_by_wolf = false
+	wolf_active = false
+	wolf_crying = false
+	wolf_trail.clear()
+	timer_started = false
+	start_time_msec = 0
+	current_time_sec = 0.0
 	win_banner.hide()
 
 	if audio_start_player != null:
@@ -161,6 +228,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				_start_new_game(difficulty_level - 1)
 		elif event.keycode == KEY_R:
 			_start_new_game(difficulty_level)
+		elif event.keycode == KEY_P:
+			current_skin_idx = (current_skin_idx + 1) % skin_list.size()
+			var skin_key = skin_list[current_skin_idx]
+			if player_skins.has(skin_key):
+				mochi_textures = player_skins[skin_key]
+			queue_redraw()
+		elif event.keycode == KEY_F:
+			if wolf_active:
+				wolf_active = false
+			else:
+				wolf_active = true
+				wolf_crying = false
+				wolf_pos = Vector2(
+					maze_data.entrance.x * CELL_SIZE + CELL_SIZE / 2.0,
+					maze_data.entrance.y * CELL_SIZE + CELL_SIZE / 2.0
+				)
+				wolf_trail.clear()
+				if audio_wolf_player != null:
+					audio_wolf_player.play()
 
 	elif event is InputEventMouseButton:
 		if event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
@@ -199,17 +285,104 @@ func _zoom(factor: float, mouse_pos: Vector2) -> void:
 	following_player = false
 	queue_redraw()
 
+func _has_movement_input() -> bool:
+	return Input.is_action_pressed("ui_left") or Input.is_action_pressed("ui_right") \
+		or Input.is_action_pressed("ui_up") or Input.is_action_pressed("ui_down") \
+		or Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_D) \
+		or Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_S)
+
 func _physics_process(delta: float) -> void:
-	if not won and maze_data != null:
+	if not won and not caught_by_wolf and maze_data != null:
+		# 玩家按下方向键后开始按精确到 0.01 秒计时
+		if not timer_started:
+			if player.is_moving or _has_movement_input():
+				timer_started = true
+				start_time_msec = Time.get_ticks_msec()
+
+		if timer_started:
+			current_time_sec = (Time.get_ticks_msec() - start_time_msec) / 1000.0
+			_update_hud()
+
 		player.process_movement(delta, maze_data, CELL_SIZE)
+
+		# 大灰狼追赶与轨迹追踪逻辑
+		if wolf_active:
+			var p_center = player.pixel_position + Vector2(player.size / 2.0, player.size / 2.0)
+			if wolf_trail.size() == 0 or wolf_trail[-1].distance_to(p_center) >= 8.0:
+				wolf_trail.append(p_center)
+
+			var target = wolf_trail[0] if wolf_trail.size() > 0 else p_center
+			var dir = target - wolf_pos
+			var dist = dir.length()
+
+			if dist < 6.0 and wolf_trail.size() > 0:
+				wolf_trail.remove_at(0)
+				if wolf_trail.size() > 0:
+					target = wolf_trail[0]
+					dir = target - wolf_pos
+					dist = dir.length()
+
+			if dist > 0.001:
+				var move_step = min(wolf_speed * delta, dist)
+				wolf_pos += dir.normalized() * move_step
+				if abs(dir.x) > abs(dir.y):
+					wolf_facing = "right" if dir.x > 0 else "left"
+				else:
+					wolf_facing = "down" if dir.y > 0 else "up"
+
+				wolf_step_timer += delta
+				if wolf_step_timer >= 0.15:
+					wolf_step_timer = 0.0
+					wolf_anim_frame = (wolf_anim_frame + 1) % 2
+
+			# 检查大灰狼是否抓到玩家
+			if wolf_pos.distance_to(p_center) < CELL_SIZE * 0.65:
+				caught_by_wolf = true
+				win_label.text = "😱 被大灰狼抓住了！\n按 R 重新开始"
+				win_banner.show()
+				if audio_caught_player != null:
+					audio_caught_player.play()
+
 		if player.check_reached_exit(maze_data, CELL_SIZE):
 			won = true
+			if wolf_active:
+				wolf_crying = true
+
+			if timer_started:
+				current_time_sec = (Time.get_ticks_msec() - start_time_msec) / 1000.0
+
+			var has_prev = best_records.has(difficulty_level)
+			var prev_best = best_records.get(difficulty_level, 999999.0)
+			var is_new_record = false
+
+			if not has_prev or current_time_sec < prev_best:
+				is_new_record = true
+				best_records[difficulty_level] = current_time_sec
+				_save_best_records()
+
+			if is_new_record:
+				if not has_prev:
+					win_label.text = "🎉 产生首个新纪录！\n用时: %.2f 秒\n按 R 再来一局" % current_time_sec
+				else:
+					win_label.text = "🏆 恭喜打破新纪录！\n用时: %.2f 秒 (旧纪录: %.2f 秒)\n按 R 再来一局" % [current_time_sec, prev_best]
+			else:
+				win_label.text = "到达出口！\n用时: %.2f 秒 (最佳纪录: %.2f 秒)\n按 R 再来一局" % [current_time_sec, prev_best]
+
 			win_banner.show()
+			_update_hud()
+
 			if audio_win_player != null:
 				audio_win_player.play()
 
 		if following_player:
 			_update_player_focus()
+
+	elif won and wolf_active:
+		wolf_crying = true
+		wolf_step_timer += delta
+		if wolf_step_timer >= 0.25:
+			wolf_step_timer = 0.0
+			wolf_anim_frame = (wolf_anim_frame + 1) % 2
 
 	queue_redraw()
 
@@ -221,9 +394,32 @@ func _update_hud() -> void:
 	if maze_data == null or maze_data.metrics == null:
 		return
 	var m = maze_data.metrics
-	hud_label.text = "难度 %s  |  路径 %d  死胡同 %d  岔路 %d  岔深 %.1f  分数 %.0f    WASD移动  1-9/0选1-10阶  +/-切换  R重随  拖拽平移/滚轮缩放  C/Space视角" % [
-		m.label, m.path_length, m.dead_ends, m.decision_cells, m.avg_dead_end_depth, m.score
+	var best_str = ("%.2f秒" % best_records[difficulty_level]) if best_records.has(difficulty_level) else "无纪录"
+	var time_str = ("%.2f秒" % current_time_sec) if timer_started else "按方向键开始"
+
+	hud_label.text = "难度 %s阶 | 用时: %s  最佳纪录: %s    路径 %d 死胡同 %d    WASD移动 1-9/0选阶 +/-切换 R重随 P切换角色 F召唤大灰狼 C视角" % [
+		m.label, time_str, best_str, m.path_length, m.dead_ends
 	]
+
+func _load_best_records() -> void:
+	var path = "user://best_records.json"
+	if FileAccess.file_exists(path):
+		var file = FileAccess.open(path, FileAccess.READ)
+		if file != null:
+			var json = JSON.new()
+			if json.parse(file.get_as_text()) == OK:
+				var data = json.get_data()
+				if data is Dictionary:
+					for k in data.keys():
+						best_records[int(k)] = float(data[k])
+
+func _save_best_records() -> void:
+	var file = FileAccess.open("user://best_records.json", FileAccess.WRITE)
+	if file != null:
+		var data = {}
+		for k in best_records.keys():
+			data[str(k)] = float(best_records[k])
+		file.store_string(JSON.stringify(data))
 
 func _draw() -> void:
 	if maze_data == null:
@@ -254,12 +450,13 @@ func _draw() -> void:
 			var color = COLOR_WALL if tile == MazeGenerator.WALL else COLOR_PATH
 			draw_rect(rect, color)
 
-	# 入口与出口绘制
-	_draw_tile_marker(maze_data.entrance, COLOR_ENTRANCE, "house")
-	_draw_tile_marker(maze_data.exit_tile, COLOR_EXIT, "flag")
+	# 入口与出口绘制 (起点大树，终点小房子)
+	_draw_tile_marker(maze_data.entrance, COLOR_ENTRANCE, "tree")
+	_draw_tile_marker(maze_data.exit_tile, COLOR_EXIT, "house")
 
-	# 绘制萌系 Q 版小人
+	# 绘制萌系 Q 版小人与大灰狼
 	_draw_player()
+	_draw_wolf()
 
 	# HUD 顶栏背景
 	draw_rect(Rect2(0, 0, win_size.x, HUD_HEIGHT), COLOR_HUD_BG)
@@ -270,17 +467,37 @@ func _draw_tile_marker(tile: Vector2i, color: Color, type: String) -> void:
 	var rect = Rect2(p1, p2 - p1)
 	draw_rect(rect, color)
 
-	# 给终点/起点绘制耀眼高对比金色外框，防止与背景混淆
-	if type == "flag":
-		draw_rect(rect, Color(1.0, 0.90, 0.20), false, max(1.0, camera_scale * 1.8))
-	elif type == "house":
+	# 给终点/起点绘制耀眼高对比外框，防止与背景混淆
+	if type == "house":
 		draw_rect(rect, Color(1.0, 0.80, 0.30), false, max(1.0, camera_scale * 1.8))
+	elif type == "tree":
+		draw_rect(rect, Color(0.40, 0.90, 0.40), false, max(1.0, camera_scale * 1.8))
+	elif type == "flag":
+		draw_rect(rect, Color(1.0, 0.90, 0.20), false, max(1.0, camera_scale * 1.8))
 
 	if rect.size.x >= 6.0:
 		if type == "house":
 			_draw_mini_house(rect)
+		elif type == "tree":
+			_draw_mini_tree(rect)
 		elif type == "flag":
 			_draw_mini_flag(rect)
+
+func _draw_mini_tree(rect: Rect2) -> void:
+	var s = rect.size.x
+	var pos = rect.position
+	# 树干
+	var trunk = Rect2(pos + Vector2(s * 0.40, s * 0.55), Vector2(s * 0.20, s * 0.38))
+	draw_rect(trunk, Color(0.52, 0.32, 0.18))
+	# 树冠 (三重绿色圆/多边形)
+	draw_circle(pos + Vector2(s * 0.50, s * 0.38), s * 0.28, Color(0.18, 0.62, 0.25))
+	draw_circle(pos + Vector2(s * 0.35, s * 0.42), s * 0.22, Color(0.22, 0.68, 0.30))
+	draw_circle(pos + Vector2(s * 0.65, s * 0.42), s * 0.22, Color(0.22, 0.68, 0.30))
+	# 顶部高光
+	draw_circle(pos + Vector2(s * 0.45, s * 0.28), s * 0.16, Color(0.35, 0.82, 0.42))
+	# 红色小小果实点缀
+	draw_circle(pos + Vector2(s * 0.36, s * 0.38), s * 0.05, Color(0.92, 0.20, 0.20))
+	draw_circle(pos + Vector2(s * 0.62, s * 0.32), s * 0.05, Color(0.92, 0.20, 0.20))
 
 func _draw_mini_house(rect: Rect2) -> void:
 	var s = rect.size.x
@@ -345,9 +562,11 @@ func _draw_player() -> void:
 				# 待机帧 (优先使用 _idle 帧)
 				cur_tex = tex_list[2] if tex_list.size() >= 3 else tex_list[0]
 
-			# 果冻 Q 弹跳跃
+			# 果冻 Q 弹跳跃 (通关后一跳一跳的开心跳跃)
 			var bounce_y = 0.0
-			if player.is_moving:
+			if won:
+				bounce_y = abs(sin(Time.get_ticks_msec() * 0.012)) * rect.size.y * 0.25
+			elif player.is_moving:
 				bounce_y = abs(sin(Time.get_ticks_msec() * 0.020)) * rect.size.y * 0.08
 
 			var render_rect = Rect2(rect.position - Vector2(0, bounce_y), rect.size)
@@ -356,7 +575,9 @@ func _draw_player() -> void:
 		elif player_tex != null:
 			var s = rect.size.x
 			var bounce_y = 0.0
-			if player.is_moving:
+			if won:
+				bounce_y = abs(sin(Time.get_ticks_msec() * 0.012)) * s * 0.25
+			elif player.is_moving:
 				bounce_y = abs(sin(Time.get_ticks_msec() * 0.020)) * s * 0.10
 
 			var render_rect = Rect2(rect.position - Vector2(0, bounce_y), rect.size)
@@ -369,6 +590,22 @@ func _draw_player() -> void:
 			_draw_cute_character(rect, player.facing, player.anim_frame)
 	else:
 		draw_rect(rect, Color(0.27, 0.55, 0.90))
+
+func _draw_wolf() -> void:
+	if not wolf_active:
+		return
+	var draw_w = CELL_SIZE * 1.35
+	var draw_h = CELL_SIZE * 1.35
+	var p1 = offset_pos + (wolf_pos - Vector2(draw_w / 2.0, draw_h / 2.0)) * camera_scale
+	var p2 = offset_pos + (wolf_pos + Vector2(draw_w / 2.0, draw_h / 2.0)) * camera_scale
+	var rect = Rect2(p1, p2 - p1)
+
+	if rect.size.x >= 6.0:
+		var facing_key = "cry" if wolf_crying else wolf_facing
+		if wolf_textures.has(facing_key):
+			var tex_list = wolf_textures[facing_key]
+			var idx = wolf_anim_frame % tex_list.size()
+			draw_texture_rect(tex_list[idx], rect, false)
 
 func _draw_cute_character(rect: Rect2, facing: String, frame: int) -> void:
 	var s = rect.size.x

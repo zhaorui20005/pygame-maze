@@ -2,8 +2,29 @@
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import sys
+
+RECORDS_FILE = "best_records.json"
+
+def _load_best_records() -> dict[int, float]:
+    if os.path.exists(RECORDS_FILE):
+        try:
+            with open(RECORDS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return {int(k): float(v) for k, v in data.items()}
+        except Exception as e:
+            print(f"Warning: failed to load best records: {e}")
+    return {}
+
+def _save_best_records(records: dict[int, float]) -> None:
+    try:
+        with open(RECORDS_FILE, "w", encoding="utf-8") as f:
+            json.dump({str(k): v for k, v in records.items()}, f, indent=2)
+    except Exception as e:
+        print(f"Warning: failed to save best records: {e}")
 
 import pygame
 
@@ -11,9 +32,14 @@ from assets import (
     create_flag_surface,
     create_house_surface,
     create_player_sprites,
+    create_sound_caught,
     create_sound_start,
     create_sound_step,
     create_sound_win,
+    create_sound_wolf,
+    create_tree_surface,
+    create_wolf_sprites,
+    load_all_player_skins,
 )
 from maze import Maze, assert_perfect_maze, generate_maze
 from player import Player
@@ -258,6 +284,83 @@ def _is_reroll_event(event: pygame.event.Event) -> bool:
     return False
 
 
+class Wolf:
+    """追赶玩家的大灰狼角色，追随玩家步迹路线移动。"""
+
+    def __init__(self, cell_size: int = CELL_SIZE) -> None:
+        self.cell_size = cell_size
+        self.x = 0.0
+        self.y = 0.0
+        self.speed = 1.8  # 速度慢于玩家
+        self.facing = "down"
+        self.anim_frame = 0
+        self.step_timer = 0.0
+        self.active = False
+        self.trail: list[tuple[float, float]] = []
+        self.crying = False
+
+    def spawn(self, entrance_tile: tuple[int, int]) -> None:
+        self.x = entrance_tile[0] * self.cell_size + self.cell_size / 2.0
+        self.y = entrance_tile[1] * self.cell_size + self.cell_size / 2.0
+        self.facing = "down"
+        self.anim_frame = 0
+        self.step_timer = 0.0
+        self.active = True
+        self.trail = []
+        self.crying = False
+
+    def record_trail(self, p_center: tuple[float, float]) -> None:
+        if not self.trail:
+            self.trail.append(p_center)
+        else:
+            lx, ly = self.trail[-1]
+            px, py = p_center
+            if math.hypot(px - lx, py - ly) >= 8.0:
+                self.trail.append(p_center)
+
+    def update(self, dt: float, p_center: tuple[float, float]) -> None:
+        if not self.active:
+            return
+
+        if self.crying:
+            # 玩家通关到达后大灰狼躺地上哭
+            self.step_timer += dt
+            if self.step_timer >= 0.25:
+                self.step_timer = 0.0
+                self.anim_frame = (self.anim_frame + 1) % 2
+            return
+
+        target = self.trail[0] if self.trail else p_center
+        tx, ty = target
+        dx = tx - self.x
+        dy = ty - self.y
+        dist = math.hypot(dx, dy)
+
+        if dist < 6.0 and self.trail:
+            self.trail.pop(0)
+            if self.trail:
+                target = self.trail[0]
+                tx, ty = target
+                dx = tx - self.x
+                dy = ty - self.y
+                dist = math.hypot(dx, dy)
+
+        if dist > 0.001:
+            move_step = min(self.speed * 60.0 * dt, dist)
+            self.x += (dx / dist) * move_step
+            self.y += (dy / dist) * move_step
+
+            if abs(dx) > abs(dy):
+                self.facing = "right" if dx > 0 else "left"
+            else:
+                self.facing = "down" if dy > 0 else "up"
+
+            self.step_timer += dt
+            if self.step_timer >= 0.15:
+                self.step_timer = 0.0
+                self.anim_frame = (self.anim_frame + 1) % 2
+
+
 def main() -> None:
     pygame.init()
     pygame.display.set_caption("Maze Game")
@@ -275,11 +378,17 @@ def main() -> None:
     sound_step = create_sound_step()
     sound_start = create_sound_start()
     sound_win = create_sound_win()
+    sound_wolf = create_sound_wolf()
+    sound_caught = create_sound_caught()
 
     # 生成图形资产
+    tree_surf = create_tree_surface(128)
     house_surf = create_house_surface(128)
-    flag_surf = create_flag_surface(128)
-    player_sprites = create_player_sprites(128)
+    player_skins = load_all_player_skins(128)
+    skin_list = ["red_hood", "mochi"]
+    current_skin_idx = 0
+    player_sprites = player_skins[skin_list[current_skin_idx]]
+    wolf_sprites = create_wolf_sprites(128)
 
     clock = pygame.time.Clock()
     font = _font(18)
@@ -289,9 +398,34 @@ def main() -> None:
     maze = _make_maze(str(difficulty_level))
     screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
     player = _spawn_player(maze)
+    wolf = Wolf(CELL_SIZE)
     camera = Camera()
     camera.fit_maze(maze, screen)
     won = False
+    caught_by_wolf = False
+
+    # 计时器与纪录管理
+    best_records = _load_best_records()
+    timer_started = False
+    start_time_ms = 0
+    current_time_sec = 0.0
+    win_message_lines = []
+
+    def reset_level_state():
+        nonlocal maze, screen, player, wolf, camera, won, caught_by_wolf, timer_started, start_time_ms, current_time_sec, win_message_lines
+        maze = _make_maze(str(difficulty_level))
+        screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
+        player = _spawn_player(maze)
+        wolf = Wolf(CELL_SIZE)
+        camera.fit_maze(maze, screen)
+        won = False
+        caught_by_wolf = False
+        timer_started = False
+        start_time_ms = 0
+        current_time_sec = 0.0
+        win_message_lines = []
+        if sound_start:
+            sound_start.play()
 
     # 开局播放声音
     if sound_start:
@@ -309,53 +443,33 @@ def main() -> None:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.key == pygame.K_f:
+                    if wolf.active:
+                        wolf.active = False
+                    else:
+                        wolf.spawn(maze.entrance)
+                        if sound_wolf:
+                            sound_wolf.play()
+                elif event.key == pygame.K_p:
+                    current_skin_idx = (current_skin_idx + 1) % len(skin_list)
+                    player_sprites = player_skins[skin_list[current_skin_idx]]
                 elif event.key in (pygame.K_c, pygame.K_SPACE):
                     camera.toggle_view(maze, player, screen)
                 elif event.key in NUM_KEY_TO_LEVEL:
                     difficulty_level = NUM_KEY_TO_LEVEL[event.key]
-                    maze = _make_maze(str(difficulty_level))
-                    screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
-                    player = _spawn_player(maze)
-                    camera.fit_maze(maze, screen)
-                    won = False
-                    if sound_start:
-                        sound_start.play()
+                    reset_level_state()
                 elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS):
                     if difficulty_level < 10:
                         difficulty_level += 1
-                        maze = _make_maze(str(difficulty_level))
-                        screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
-                        player = _spawn_player(maze)
-                        camera.fit_maze(maze, screen)
-                        won = False
-                        if sound_start:
-                            sound_start.play()
+                        reset_level_state()
                 elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
                     if difficulty_level > 1:
                         difficulty_level -= 1
-                        maze = _make_maze(str(difficulty_level))
-                        screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
-                        player = _spawn_player(maze)
-                        camera.fit_maze(maze, screen)
-                        won = False
-                        if sound_start:
-                            sound_start.play()
+                        reset_level_state()
                 elif _is_reroll_event(event):
-                    maze = _make_maze(str(difficulty_level))
-                    screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
-                    player = _spawn_player(maze)
-                    camera.fit_maze(maze, screen)
-                    won = False
-                    if sound_start:
-                        sound_start.play()
+                    reset_level_state()
             elif event.type != pygame.KEYDOWN and _is_reroll_event(event):
-                maze = _make_maze(str(difficulty_level))
-                screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
-                player = _spawn_player(maze)
-                camera.fit_maze(maze, screen)
-                won = False
-                if sound_start:
-                    sound_start.play()
+                reset_level_state()
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.pos[1] > HUD_HEIGHT:
                     if event.button in (1, 2, 3):
@@ -377,12 +491,59 @@ def main() -> None:
                     if factor != 1.0:
                         camera.zoom(factor, (mx, my))
 
-        # 通关后停步，但仍可按 R / 数字键 重开。
-        if not won:
+        # 通关/被抓后停步，但仍可按 R / 数字键 重开。
+        dt = clock.get_time() / 1000.0
+        if not won and not caught_by_wolf:
             keys = pygame.key.get_pressed()
+
+            # 第一次按方向键后开启精确到 0.01s 的计时器
+            if not timer_started:
+                if any(keys[k] for k in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s)):
+                    timer_started = True
+                    start_time_ms = pygame.time.get_ticks()
+
+            if timer_started:
+                current_time_sec = (pygame.time.get_ticks() - start_time_ms) / 1000.0
+
             player.update(keys, maze, CELL_SIZE, sound_step)
+
+            # 更新大灰狼轨迹与追赶逻辑
+            if wolf.active:
+                wolf.record_trail(player.rect.center)
+                wolf.update(dt, player.rect.center)
+
+                # 检查大灰狼是否抓到玩家
+                if math.hypot(wolf.x - player.rect.centerx, wolf.y - player.rect.centery) < CELL_SIZE * 0.65:
+                    caught_by_wolf = True
+                    win_message_lines = ["😱 被大灰狼抓住了！", "按 R 重新开始"]
+                    if sound_caught:
+                        sound_caught.play()
+
             if player.reached_exit(maze, CELL_SIZE):
                 won = True
+                if wolf.active:
+                    wolf.crying = True
+
+                if timer_started:
+                    current_time_sec = (pygame.time.get_ticks() - start_time_ms) / 1000.0
+
+                has_prev = difficulty_level in best_records
+                prev_best = best_records.get(difficulty_level, 999999.0)
+                is_new_record = False
+
+                if not has_prev or current_time_sec < prev_best:
+                    is_new_record = True
+                    best_records[difficulty_level] = current_time_sec
+                    _save_best_records(best_records)
+
+                if is_new_record:
+                    if not has_prev:
+                        win_message_lines = [f"🎉 产生首个新纪录！", f"用时: {current_time_sec:.2f} 秒", "按 R 再来一局"]
+                    else:
+                        win_message_lines = [f"🏆 恭喜打破新纪录！", f"用时: {current_time_sec:.2f} 秒 (旧纪录: {prev_best:.2f} 秒)", "按 R 再来一局"]
+                else:
+                    win_message_lines = ["到达出口！", f"用时: {current_time_sec:.2f} 秒 (最佳纪录: {prev_best:.2f} 秒)", "按 R 再来一局"]
+
                 if sound_win:
                     sound_win.play()
 
@@ -397,18 +558,29 @@ def main() -> None:
                         camera.fit_maze(maze, screen)
                     else:
                         camera.focus_player(player, screen)
+        elif won and wolf.active:
+            wolf.crying = True
+            wolf.update(dt, player.rect.center)
 
         _draw(
             screen,
             maze,
             player,
+            wolf,
             font,
             big_font,
             won,
+            caught_by_wolf,
             camera,
+            tree_surf,
             house_surf,
-            flag_surf,
             player_sprites,
+            wolf_sprites,
+            difficulty_level,
+            best_records,
+            timer_started,
+            current_time_sec,
+            win_message_lines,
         )
         pygame.display.flip()
         clock.tick(FPS)
@@ -421,13 +593,21 @@ def _draw(
     screen: pygame.Surface,
     maze: Maze,
     player: Player,
+    wolf: Wolf,
     font: pygame.font.Font,
     big_font: pygame.font.Font,
     won: bool,
+    caught_by_wolf: bool,
     camera: Camera,
+    tree_surf: pygame.Surface,
     house_surf: pygame.Surface,
-    flag_surf: pygame.Surface,
     player_sprites: dict[str, list[pygame.Surface]],
+    wolf_sprites: dict[str, list[pygame.Surface]],
+    difficulty_level: int,
+    best_records: dict[int, float],
+    timer_started: bool,
+    current_time_sec: float,
+    win_message_lines: list[str],
 ) -> None:
     screen.fill(COLOR_BG)
     screen_w, screen_h = screen.get_size()
@@ -460,10 +640,10 @@ def _draw(
             color = COLOR_WALL if tile == 1 else COLOR_PATH
             pygame.draw.rect(screen, color, rect)
 
-    # 入口与出口瓦片及图案 (房子、旗子)
+    # 入口与出口瓦片及图案 (起点大树、终点小房子)
     for (tx, ty), color, surf in (
-        (maze.entrance, COLOR_ENTRANCE, house_surf),
-        (maze.exit, COLOR_EXIT, flag_surf),
+        (maze.entrance, COLOR_ENTRANCE, tree_surf),
+        (maze.exit, COLOR_EXIT, house_surf),
     ):
         if min_tile_x <= tx <= max_tile_x and min_tile_y <= ty <= max_tile_y:
             x1, y1 = camera.world_to_screen(tx * CELL_SIZE, ty * CELL_SIZE)
@@ -479,9 +659,8 @@ def _draw(
                 scaled_surf = pygame.transform.smoothscale(surf, (rect.w, rect.h))
                 screen.blit(scaled_surf, rect.topleft)
 
-    # 绘制玩家 (大头萌系小人，渲染尺寸调整为包含视口缩放的大尺寸显示，醒目醒目)
+    # 绘制玩家 (通关后一跳一跳的开心跳跃动画)
     center_wx, center_wy = player.rect.centerx, player.rect.centery
-    # 渲染显示宽度为格子宽度的 1.25 倍，居中对齐，使其在走廊中非常突出可爱
     draw_w = CELL_SIZE * 1.25
     draw_h = CELL_SIZE * 1.25
     px1, py1 = camera.world_to_screen(center_wx - draw_w / 2.0, center_wy - draw_h / 2.0)
@@ -493,37 +672,100 @@ def _draw(
         max(1, int(py2 - py1)),
     )
 
-    if player_draw_rect.w >= 4 and player_draw_rect.h >= 4:
+    bounce_y = 0.0
+    if won:
+        bounce_y = abs(math.sin(pygame.time.get_ticks() * 0.012)) * (player_draw_rect.h * 0.25)
+
+    player_render_rect = pygame.Rect(
+        player_draw_rect.x,
+        int(player_draw_rect.y - bounce_y),
+        player_draw_rect.w,
+        player_draw_rect.h,
+    )
+
+    if player_render_rect.w >= 4 and player_render_rect.h >= 4:
         facing_sprites = player_sprites.get(player.facing, player_sprites["down"])
-        cur_sprite = facing_sprites[player.anim_frame]
-        scaled_player = pygame.transform.smoothscale(cur_sprite, (player_draw_rect.w, player_draw_rect.h))
-        screen.blit(scaled_player, player_draw_rect.topleft)
+        cur_sprite = facing_sprites[player.anim_frame % len(facing_sprites)]
+        scaled_player = pygame.transform.smoothscale(cur_sprite, (player_render_rect.w, player_render_rect.h))
+        screen.blit(scaled_player, player_render_rect.topleft)
     else:
         radius = max(0, int(4 * scale))
-        pygame.draw.rect(screen, COLOR_PLAYER, player_draw_rect, border_radius=radius)
+        pygame.draw.rect(screen, COLOR_PLAYER, player_render_rect, border_radius=radius)
 
-    # HUD 区域 (覆盖在迷宫顶部)
+    # 绘制追赶的大灰狼
+    if wolf.active:
+        w_draw_w = CELL_SIZE * 1.35
+        w_draw_h = CELL_SIZE * 1.35
+        w_px1, w_py1 = camera.world_to_screen(wolf.x - w_draw_w / 2.0, wolf.y - w_draw_h / 2.0)
+        w_px2, w_py2 = camera.world_to_screen(wolf.x + w_draw_w / 2.0, wolf.y + w_draw_h / 2.0)
+        wolf_draw_rect = pygame.Rect(
+            int(w_px1),
+            int(w_py1),
+            max(1, int(w_px2 - w_px1)),
+            max(1, int(w_py2 - w_py1)),
+        )
+
+        facing_key = "cry" if wolf.crying else wolf.facing
+        w_frames = wolf_sprites.get(facing_key, wolf_sprites.get("down", []))
+        if w_frames and wolf_draw_rect.w >= 4 and wolf_draw_rect.h >= 4:
+            cur_w_sprite = w_frames[wolf.anim_frame % len(w_frames)]
+            scaled_wolf = pygame.transform.smoothscale(cur_w_sprite, (wolf_draw_rect.w, wolf_draw_rect.h))
+            screen.blit(scaled_wolf, wolf_draw_rect.topleft)
+
+    # HUD 区域 (覆盖在迷宫顶部，显示精确到 0.01 秒的用时与最佳纪录)
     pygame.draw.rect(screen, COLOR_BG, (0, 0, screen_w, HUD_HEIGHT))
     m = maze.metrics
+    best_sec = best_records.get(difficulty_level)
+    best_str = f"{best_sec:.2f}秒" if best_sec is not None else "无纪录"
+    time_str = f"{current_time_sec:.2f}秒" if timer_started else "按方向键开始"
+
     hud = (
-        f"难度 {m.label}  |  路径 {m.path_length}  死胡同 {m.dead_ends}  "
-        f"岔路 {m.decision_cells}  岔深 {m.avg_dead_end_depth:.1f}  分数 {m.score:.0f}    "
-        "WASD/方向键移动  1-9/0选1-10阶  +/-切换  R重随  拖拽平移/滚轮缩放  C/Space视角  Esc退出"
+        f"难度 {m.label}阶 | 用时: {time_str}  最佳纪录: {best_str}    "
+        f"路径 {m.path_length} 死胡同 {m.dead_ends}    "
+        "WASD移动 1-9/0选阶 +/-切换 R重随 P切换角色 F召唤大灰狼 C视角"
     )
     screen.blit(font.render(hud, True, COLOR_HUD), (10, 16))
 
-    if won:
-        _draw_win_banner(screen, big_font)
+    if won or caught_by_wolf:
+        _draw_win_banner(screen, big_font, font, win_message_lines)
 
 
-def _draw_win_banner(screen: pygame.Surface, big_font: pygame.font.Font) -> None:
-    """通关提示：深红底 + 亮黄字，铺在迷宫上方居中，避免和浅色路面糊在一起。"""
-    msg = big_font.render("到达出口！按 R 再来一局", True, COLOR_WIN)
-    box = msg.get_rect(center=(screen.get_width() // 2, HUD_HEIGHT + 48))
-    banner = box.inflate(36, 20)
-    pygame.draw.rect(screen, COLOR_WIN_OUTLINE, banner.inflate(8, 8), border_radius=8)
-    pygame.draw.rect(screen, COLOR_WIN_BANNER, banner, border_radius=6)
-    screen.blit(msg, box)
+def _draw_win_banner(
+    screen: pygame.Surface,
+    big_font: pygame.font.Font,
+    small_font: pygame.font.Font,
+    lines: list[str],
+) -> None:
+    """通关与纪录提示弹窗：深红底 + 亮黄字。"""
+    if not lines:
+        lines = ["到达出口！按 R 再来一局"]
+
+    rendered_surfs = []
+    total_h = 0
+    max_w = 0
+    for i, line in enumerate(lines):
+        f = big_font if i == 0 else small_font
+        color = COLOR_WIN if i == 0 else (255, 255, 220)
+        s = f.render(line, True, color)
+        rendered_surfs.append(s)
+        total_h += s.get_height() + 6
+        if s.get_width() > max_w:
+            max_w = s.get_width()
+
+    banner_w = max_w + 48
+    banner_h = total_h + 20
+    cx = screen.get_width() // 2
+    cy = HUD_HEIGHT + 70
+
+    banner_rect = pygame.Rect(cx - banner_w // 2, cy - banner_h // 2, banner_w, banner_h)
+    pygame.draw.rect(screen, COLOR_WIN_OUTLINE, banner_rect.inflate(8, 8), border_radius=10)
+    pygame.draw.rect(screen, COLOR_WIN_BANNER, banner_rect, border_radius=8)
+
+    cur_y = banner_rect.top + 10
+    for s in rendered_surfs:
+        sx = cx - s.get_width() // 2
+        screen.blit(s, (sx, cur_y))
+        cur_y += s.get_height() + 6
 
 
 if __name__ == "__main__":
