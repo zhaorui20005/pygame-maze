@@ -50,6 +50,29 @@ FONT_CANDIDATES = (
     "Droid Sans Fallback",
 )
 
+NUM_KEY_TO_LEVEL = {
+    pygame.K_1: 1,
+    pygame.K_2: 2,
+    pygame.K_3: 3,
+    pygame.K_4: 4,
+    pygame.K_5: 5,
+    pygame.K_6: 6,
+    pygame.K_7: 7,
+    pygame.K_8: 8,
+    pygame.K_9: 9,
+    pygame.K_0: 10,
+    pygame.K_KP1: 1,
+    pygame.K_KP2: 2,
+    pygame.K_KP3: 3,
+    pygame.K_KP4: 4,
+    pygame.K_KP5: 5,
+    pygame.K_KP6: 6,
+    pygame.K_KP7: 7,
+    pygame.K_KP8: 8,
+    pygame.K_KP9: 9,
+    pygame.K_KP0: 10,
+}
+
 
 class Camera:
     """视角摄像机：支持按视口紧贴适应、自动缩放、拖拽平移与滚轮缩放。"""
@@ -178,9 +201,13 @@ def _make_maze(difficulty: str) -> Maze:
 def _window_size(maze: Maze) -> tuple[int, int]:
     """根据地图大小动态计算合适的窗口物理尺寸，不超过桌面允许的最大范围。"""
     try:
-        info = pygame.display.Info()
-        screen_w = info.current_w if info.current_w > 0 else 1280
-        screen_h = info.current_h if info.current_h > 0 else 800
+        sizes = pygame.display.get_desktop_sizes()
+        if sizes and sizes[0][0] >= 640 and sizes[0][1] >= 480:
+            screen_w, screen_h = sizes[0]
+        else:
+            info = pygame.display.Info()
+            screen_w = info.current_w if info.current_w >= 640 else 1280
+            screen_h = info.current_h if info.current_h >= 480 else 800
     except Exception:
         screen_w, screen_h = 1280, 800
 
@@ -233,8 +260,8 @@ def main() -> None:
     font = _font(18)
     big_font = _font(36)
 
-    difficulty = "normal"
-    maze = _make_maze(difficulty)
+    difficulty_level = 5  # 默认 5 阶难度
+    maze = _make_maze(str(difficulty_level))
     screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
     player = _spawn_player(maze)
     camera = Camera()
@@ -255,23 +282,37 @@ def main() -> None:
                     running = False
                 elif event.key in (pygame.K_c, pygame.K_SPACE):
                     camera.toggle_view(maze, player, screen)
-                elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3):
-                    difficulty = {pygame.K_1: "easy", pygame.K_2: "normal", pygame.K_3: "hard"}[
-                        event.key
-                    ]
-                    maze = _make_maze(difficulty)
+                elif event.key in NUM_KEY_TO_LEVEL:
+                    difficulty_level = NUM_KEY_TO_LEVEL[event.key]
+                    maze = _make_maze(str(difficulty_level))
                     screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
                     player = _spawn_player(maze)
                     camera.fit_maze(maze, screen)
                     won = False
+                elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS):
+                    if difficulty_level < 10:
+                        difficulty_level += 1
+                        maze = _make_maze(str(difficulty_level))
+                        screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
+                        player = _spawn_player(maze)
+                        camera.fit_maze(maze, screen)
+                        won = False
+                elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                    if difficulty_level > 1:
+                        difficulty_level -= 1
+                        maze = _make_maze(str(difficulty_level))
+                        screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
+                        player = _spawn_player(maze)
+                        camera.fit_maze(maze, screen)
+                        won = False
                 elif _is_reroll_event(event):
-                    maze = _make_maze(difficulty)
+                    maze = _make_maze(str(difficulty_level))
                     screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
                     player = _spawn_player(maze)
                     camera.fit_maze(maze, screen)
                     won = False
             elif event.type != pygame.KEYDOWN and _is_reroll_event(event):
-                maze = _make_maze(difficulty)
+                maze = _make_maze(str(difficulty_level))
                 screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
                 player = _spawn_player(maze)
                 camera.fit_maze(maze, screen)
@@ -297,7 +338,7 @@ def main() -> None:
                     if factor != 1.0:
                         camera.zoom(factor, (mx, my))
 
-        # 通关后停步，但仍可按 R / 1 / 2 / 3 重开。
+        # 通关后停步，但仍可按 R / 数字键 重开。
         if not won:
             keys = pygame.key.get_pressed()
             player.update(keys, maze, CELL_SIZE)
@@ -395,7 +436,7 @@ def _draw(
     hud = (
         f"难度 {m.label}  |  路径 {m.path_length}  死胡同 {m.dead_ends}  "
         f"岔路 {m.decision_cells}  岔深 {m.avg_dead_end_depth:.1f}  分数 {m.score:.0f}    "
-        "方向键/WASD 移动   1易 2中 3难   R重随   拖拽平移/滚轮缩放   C/Space视角切换   Esc退出"
+        "WASD/方向键移动  1-9/0选1-10阶  +/-切换  R重随  拖拽平移/滚轮缩放  C/Space视角  Esc退出"
     )
     screen.blit(font.render(hud, True, COLOR_HUD), (10, 16))
 

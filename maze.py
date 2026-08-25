@@ -21,39 +21,84 @@ from dataclasses import dataclass
 WALL = 1
 PATH = 0
 
-# cell_cols / cell_rows：房间（格子中心）数量，不是最终瓦片数。
-# 瓦片宽高 = 2 * 房间数 + 1（房间之间夹一堵可被打通的墙）。
-#
-# straight_bias：有未访问邻居时，按该概率优先沿当前方向继续走。
-#   直行会把每一条岔路拉长，避免刚分叉一两格就到头。
-#
-# max_straight_run：同一方向连续走这么多房间后，若能转弯就转弯。
-#   岔路仍然很长，但会拐弯，路口往里看看不见头。
-#
-# min_dead_end_depth：死胡同平均长度（按房间步数）的下限。
-#   生成后若不达标会重抽，减少「一眼假岔路」的迷宫。
+# 难度等级 1-10 参数配置
 DIFFICULTIES = {
-    "easy": {
+    "1": {
+        "cell_cols": 8,
+        "cell_rows": 8,
+        "straight_bias": 0.55,
+        "max_straight_run": 3,
+        "min_dead_end_depth": 2.2,
+    },
+    "2": {
+        "cell_cols": 10,
+        "cell_rows": 10,
+        "straight_bias": 0.60,
+        "max_straight_run": 3,
+        "min_dead_end_depth": 2.8,
+    },
+    "3": {
         "cell_cols": 12,
         "cell_rows": 12,
-        "straight_bias": 0.62,
+        "straight_bias": 0.64,
         "max_straight_run": 4,
         "min_dead_end_depth": 3.2,
     },
-    "normal": {
-        "cell_cols": 16,
-        "cell_rows": 16,
+    "4": {
+        "cell_cols": 15,
+        "cell_rows": 15,
+        "straight_bias": 0.68,
+        "max_straight_run": 4,
+        "min_dead_end_depth": 3.6,
+    },
+    "5": {
+        "cell_cols": 18,
+        "cell_rows": 18,
         "straight_bias": 0.72,
         "max_straight_run": 5,
         "min_dead_end_depth": 4.0,
     },
-    "hard": {
-        "cell_cols": 20,
-        "cell_rows": 20,
-        "straight_bias": 0.80,
+    "6": {
+        "cell_cols": 21,
+        "cell_rows": 21,
+        "straight_bias": 0.75,
+        "max_straight_run": 5,
+        "min_dead_end_depth": 4.5,
+    },
+    "7": {
+        "cell_cols": 25,
+        "cell_rows": 25,
+        "straight_bias": 0.78,
         "max_straight_run": 6,
         "min_dead_end_depth": 5.0,
     },
+    "8": {
+        "cell_cols": 30,
+        "cell_rows": 30,
+        "straight_bias": 0.81,
+        "max_straight_run": 6,
+        "min_dead_end_depth": 5.5,
+    },
+    "9": {
+        "cell_cols": 35,
+        "cell_rows": 35,
+        "straight_bias": 0.84,
+        "max_straight_run": 7,
+        "min_dead_end_depth": 6.0,
+    },
+    "10": {
+        "cell_cols": 40,
+        "cell_rows": 40,
+        "straight_bias": 0.86,
+        "max_straight_run": 8,
+        "min_dead_end_depth": 6.5,
+    },
+}
+
+_DIFFICULTY_ALIASES = {
+    "easy": "3",
+    "normal": "5",
+    "hard": "8",
 }
 
 # 房间坐标上的四连通：右、左、下、上。
@@ -98,12 +143,16 @@ class Maze:
         return self.grid[tile_y][tile_x] == WALL
 
 
-def generate_maze(difficulty_key: str = "normal", seed: int | None = None) -> Maze:
-    """按难度生成一局完美迷宫；可选 seed 便于复现。"""
-    if difficulty_key not in DIFFICULTIES:
+def generate_maze(difficulty_key: str | int = "5", seed: int | None = None) -> Maze:
+    """按难度等级 (1-10) 生成一局完美迷宫；可选 seed 便于复现。"""
+    key_str = str(difficulty_key).lower()
+    if key_str in _DIFFICULTY_ALIASES:
+        key_str = _DIFFICULTY_ALIASES[key_str]
+
+    if key_str not in DIFFICULTIES:
         raise ValueError(f"Unknown difficulty: {difficulty_key}")
 
-    spec = DIFFICULTIES[difficulty_key]
+    spec = DIFFICULTIES[key_str]
     rng = random.Random(seed)
 
     best: Maze | None = None
@@ -112,7 +161,7 @@ def generate_maze(difficulty_key: str = "normal", seed: int | None = None) -> Ma
     # 固定 seed 时只生成一次（测试/复现需要确定性）。
     # 否则多抽几局，挑死胡同更深、决策点更多的。
     for _ in range(attempts):
-        maze = _carve_maze(spec, difficulty_key, rng)
+        maze = _carve_maze(spec, key_str, rng)
         if best is None or _maze_quality(maze) > _maze_quality(best):
             best = maze
         if maze.metrics.avg_dead_end_depth >= spec["min_dead_end_depth"]:
@@ -313,7 +362,7 @@ def _measure(
         decision_cells=decision_cells,
         avg_dead_end_depth=avg_depth,
         score=score,
-        label=difficulty_key,
+        label=f"{difficulty_key} 阶",
     )
 
 
