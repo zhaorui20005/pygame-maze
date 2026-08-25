@@ -7,6 +7,14 @@ import sys
 
 import pygame
 
+from assets import (
+    create_flag_surface,
+    create_house_surface,
+    create_player_sprites,
+    create_sound_start,
+    create_sound_step,
+    create_sound_win,
+)
 from maze import Maze, assert_perfect_maze, generate_maze
 from player import Player
 
@@ -256,6 +264,22 @@ def main() -> None:
     if hasattr(pygame.key, "stop_text_input"):
         pygame.key.stop_text_input()
 
+    # 初始化 mixer 及音频资产
+    if pygame.mixer.get_init() is None:
+        try:
+            pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
+        except Exception as e:
+            print(f"Warning: mixer init failed: {e}")
+
+    sound_step = create_sound_step()
+    sound_start = create_sound_start()
+    sound_win = create_sound_win()
+
+    # 生成图形资产
+    house_surf = create_house_surface(128)
+    flag_surf = create_flag_surface(128)
+    player_sprites = create_player_sprites(128)
+
     clock = pygame.time.Clock()
     font = _font(18)
     big_font = _font(36)
@@ -267,6 +291,10 @@ def main() -> None:
     camera = Camera()
     camera.fit_maze(maze, screen)
     won = False
+
+    # 开局播放声音
+    if sound_start:
+        sound_start.play()
 
     running = True
     while running:
@@ -289,6 +317,8 @@ def main() -> None:
                     player = _spawn_player(maze)
                     camera.fit_maze(maze, screen)
                     won = False
+                    if sound_start:
+                        sound_start.play()
                 elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS):
                     if difficulty_level < 10:
                         difficulty_level += 1
@@ -297,6 +327,8 @@ def main() -> None:
                         player = _spawn_player(maze)
                         camera.fit_maze(maze, screen)
                         won = False
+                        if sound_start:
+                            sound_start.play()
                 elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
                     if difficulty_level > 1:
                         difficulty_level -= 1
@@ -305,18 +337,24 @@ def main() -> None:
                         player = _spawn_player(maze)
                         camera.fit_maze(maze, screen)
                         won = False
+                        if sound_start:
+                            sound_start.play()
                 elif _is_reroll_event(event):
                     maze = _make_maze(str(difficulty_level))
                     screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
                     player = _spawn_player(maze)
                     camera.fit_maze(maze, screen)
                     won = False
+                    if sound_start:
+                        sound_start.play()
             elif event.type != pygame.KEYDOWN and _is_reroll_event(event):
                 maze = _make_maze(str(difficulty_level))
                 screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
                 player = _spawn_player(maze)
                 camera.fit_maze(maze, screen)
                 won = False
+                if sound_start:
+                    sound_start.play()
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.pos[1] > HUD_HEIGHT:
                     if event.button in (1, 2, 3):
@@ -341,9 +379,11 @@ def main() -> None:
         # 通关后停步，但仍可按 R / 数字键 重开。
         if not won:
             keys = pygame.key.get_pressed()
-            player.update(keys, maze, CELL_SIZE)
+            player.update(keys, maze, CELL_SIZE, sound_step)
             if player.reached_exit(maze, CELL_SIZE):
                 won = True
+                if sound_win:
+                    sound_win.play()
 
             if camera.following_player:
                 camera.update_player_focus(player, screen)
@@ -357,7 +397,18 @@ def main() -> None:
                     else:
                         camera.focus_player(player, screen)
 
-        _draw(screen, maze, player, font, big_font, won, camera)
+        _draw(
+            screen,
+            maze,
+            player,
+            font,
+            big_font,
+            won,
+            camera,
+            house_surf,
+            flag_surf,
+            player_sprites,
+        )
         pygame.display.flip()
         clock.tick(FPS)
 
@@ -373,6 +424,9 @@ def _draw(
     big_font: pygame.font.Font,
     won: bool,
     camera: Camera,
+    house_surf: pygame.Surface,
+    flag_surf: pygame.Surface,
+    player_sprites: dict[str, list[pygame.Surface]],
 ) -> None:
     screen.fill(COLOR_BG)
     screen_w, screen_h = screen.get_size()
@@ -405,8 +459,11 @@ def _draw(
             color = COLOR_WALL if tile == 1 else COLOR_PATH
             pygame.draw.rect(screen, color, rect)
 
-    # 入口与出口瓦片
-    for (tx, ty), color in ((maze.entrance, COLOR_ENTRANCE), (maze.exit, COLOR_EXIT)):
+    # 入口与出口瓦片及图案 (房子、旗子)
+    for (tx, ty), color, surf in (
+        (maze.entrance, COLOR_ENTRANCE, house_surf),
+        (maze.exit, COLOR_EXIT, flag_surf),
+    ):
         if min_tile_x <= tx <= max_tile_x and min_tile_y <= ty <= max_tile_y:
             x1, y1 = camera.world_to_screen(tx * CELL_SIZE, ty * CELL_SIZE)
             x2, y2 = camera.world_to_screen((tx + 1) * CELL_SIZE, (ty + 1) * CELL_SIZE)
@@ -417,18 +474,32 @@ def _draw(
                 max(1, int(math.ceil(y2 - y1))),
             )
             pygame.draw.rect(screen, color, rect)
+            if rect.w >= 4 and rect.h >= 4:
+                scaled_surf = pygame.transform.smoothscale(surf, (rect.w, rect.h))
+                screen.blit(scaled_surf, rect.topleft)
 
-    # 玩家
-    px1, py1 = camera.world_to_screen(player.rect.left, player.rect.top)
-    px2, py2 = camera.world_to_screen(player.rect.right, player.rect.bottom)
-    player_rect = pygame.Rect(
+    # 绘制玩家 (大头萌系小人，渲染尺寸调整为包含视口缩放的大尺寸显示，醒目醒目)
+    center_wx, center_wy = player.rect.centerx, player.rect.centery
+    # 渲染显示宽度为格子宽度的 1.25 倍，居中对齐，使其在走廊中非常突出可爱
+    draw_w = CELL_SIZE * 1.25
+    draw_h = CELL_SIZE * 1.25
+    px1, py1 = camera.world_to_screen(center_wx - draw_w / 2.0, center_wy - draw_h / 2.0)
+    px2, py2 = camera.world_to_screen(center_wx + draw_w / 2.0, center_wy + draw_h / 2.0)
+    player_draw_rect = pygame.Rect(
         int(px1),
         int(py1),
         max(1, int(px2 - px1)),
         max(1, int(py2 - py1)),
     )
-    radius = max(0, int(4 * scale))
-    pygame.draw.rect(screen, COLOR_PLAYER, player_rect, border_radius=radius)
+
+    if player_draw_rect.w >= 4 and player_draw_rect.h >= 4:
+        facing_sprites = player_sprites.get(player.facing, player_sprites["down"])
+        cur_sprite = facing_sprites[player.anim_frame]
+        scaled_player = pygame.transform.smoothscale(cur_sprite, (player_draw_rect.w, player_draw_rect.h))
+        screen.blit(scaled_player, player_draw_rect.topleft)
+    else:
+        radius = max(0, int(4 * scale))
+        pygame.draw.rect(screen, COLOR_PLAYER, player_draw_rect, border_radius=radius)
 
     # HUD 区域 (覆盖在迷宫顶部)
     pygame.draw.rect(screen, COLOR_BG, (0, 0, screen_w, HUD_HEIGHT))

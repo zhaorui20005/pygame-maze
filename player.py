@@ -12,9 +12,19 @@ class Player:
         # 逻辑坐标在迷宫瓦片空间里（不含 HUD 高度），绘制时再整体下移。
         self.rect = pygame.Rect(int(pixel_x), int(pixel_y), size, size)
         self.speed = speed
+        self.facing = "down"  # 当前朝向: "down", "up", "left", "right"
+        self.anim_frame = 0   # 0 或 1，走动动画帧
+        self.is_moving = False
+        self._step_counter = 0
 
-    def update(self, keys: pygame.key.ScancodeWrapper, maze: Maze, cell_size: int) -> None:
-        """读当前按住的键，合成速度后先水平再垂直移动。"""
+    def update(
+        self,
+        keys: pygame.key.ScancodeWrapper,
+        maze: Maze,
+        cell_size: int,
+        sound_step: pygame.mixer.Sound | None = None,
+    ) -> None:
+        """读当前按住的键，合成速度后移动并更新方向、走动动画及脚步音效。"""
         dx = 0.0
         dy = 0.0
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
@@ -25,10 +35,40 @@ class Player:
             dy -= self.speed
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
             dy += self.speed
+
+        moved = False
+        old_pos = (self.rect.x, self.rect.y)
+
+        # 优先决定朝向
+        if dx < 0:
+            self.facing = "left"
+        elif dx > 0:
+            self.facing = "right"
+        elif dy < 0:
+            self.facing = "up"
+        elif dy > 0:
+            self.facing = "down"
+
         if dx:
             self._move(dx, 0, maze, cell_size)
         if dy:
             self._move(0, dy, maze, cell_size)
+
+        if (self.rect.x, self.rect.y) != old_pos:
+            moved = True
+
+        self.is_moving = moved
+
+        if self.is_moving:
+            self._step_counter += 1
+            # 步频计时：每 12 帧交替动画帧并播放脚步声
+            if self._step_counter % 12 == 0:
+                self.anim_frame = 1 - self.anim_frame
+                if sound_step:
+                    sound_step.play()
+        else:
+            self.anim_frame = 0
+            self._step_counter = 0
 
     def _move(self, dx: float, dy: float, maze: Maze, cell_size: int) -> None:
         """单轴尝试移动；新矩形只要盖到任何墙格就整段取消。"""
