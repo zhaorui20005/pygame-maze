@@ -23,11 +23,12 @@ HUD_HEIGHT = 52
 FPS = 60
 PLAYER_INSET = 6  # 角色比格子小一圈，转弯时不容易被墙角卡住
 
-COLOR_BG = (18, 18, 24)
-COLOR_WALL = (42, 48, 72)
-COLOR_PATH = (214, 214, 222)
-COLOR_ENTRANCE = (80, 160, 90)
-COLOR_EXIT = (200, 90, 70)
+# 护眼高对比度颜色配置 (森林苔绿道路 + 沉稳深蓝石墙壁 + 超醒目白糯米团子 + 浅金亮底)
+COLOR_BG = (12, 15, 22)
+COLOR_WALL = (24, 32, 46)
+COLOR_PATH = (42, 82, 60)
+COLOR_ENTRANCE = (225, 160, 50)
+COLOR_EXIT = (245, 235, 198)
 COLOR_PLAYER = (70, 140, 230)
 COLOR_HUD = (236, 236, 240)
 # 通关字：浅色路面上浅黄几乎看不见，改成黄字 + 深红底条。

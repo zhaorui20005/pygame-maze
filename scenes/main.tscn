@@ -1,0 +1,46 @@
+[gd_scene load_steps=2 format=3 uid="uid://c8m321maze_main"]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_script"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_script")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="HUDMargin" type="MarginContainer" parent="CanvasLayer"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 12.0
+offset_top = 10.0
+offset_right = -12.0
+offset_bottom = 52.0
+grow_horizontal = 2
+
+[node name="HUDLabel" type="Label" parent="CanvasLayer/HUDMargin"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.92, 0.94, 1)
+theme_override_font_sizes/font_size = 14
+text = "初始化迷宫..."
+vertical_alignment = 1
+
+[node name="WinBanner" type="PanelContainer" parent="CanvasLayer"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -160.0
+offset_top = -30.0
+offset_right = 160.0
+offset_bottom = 30.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="WinLabel" type="Label" parent="CanvasLayer/WinBanner"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 0.3, 1)
+theme_override_font_sizes/font_size = 22
+text = "到达出口！按 R 再来一局"
+horizontal_alignment = 1
+vertical_alignment = 1

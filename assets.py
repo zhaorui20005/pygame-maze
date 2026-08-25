@@ -179,40 +179,65 @@ def create_house_surface(size: int = 128) -> pygame.Surface:
 
 
 def create_flag_surface(size: int = 128) -> pygame.Surface:
-    """生成终点小旗子 Surface。"""
+    """生成终点小旗子 Surface (鲜艳大红旗帜 + 浅色底高对比)。"""
     surf = pygame.Surface((size, size), pygame.SRCALPHA)
     s = size
 
-    # 底座 (灰石台阶)
-    base_rect = pygame.Rect(int(s * 0.22), int(s * 0.82), int(s * 0.56), int(s * 0.13))
-    pygame.draw.rect(surf, (120, 130, 140), base_rect, border_radius=int(s * 0.03))
-    pygame.draw.rect(surf, (70, 80, 90), base_rect, width=int(s * 0.03), border_radius=int(s * 0.03))
+    # 底座 (暖光石阶)
+    base_rect = pygame.Rect(int(s * 0.20), int(s * 0.80), int(s * 0.60), int(s * 0.15))
+    pygame.draw.rect(surf, (220, 180, 100), base_rect, border_radius=int(s * 0.03))
 
-    # 旗杆 (金黄/木色)
+    # 旗杆 (金黄色)
     pole_x = int(s * 0.36)
-    pygame.draw.line(surf, (210, 180, 80), (pole_x, int(s * 0.10)), (pole_x, int(s * 0.85)), width=int(s * 0.06))
+    pygame.draw.line(surf, (210, 170, 40), (pole_x, int(s * 0.08)), (pole_x, int(s * 0.85)), width=int(s * 0.08))
 
     # 旗杆顶端金球
-    pygame.draw.circle(surf, (255, 230, 70), (pole_x, int(s * 0.09)), int(s * 0.055))
+    pygame.draw.circle(surf, (245, 200, 50), (pole_x, int(s * 0.08)), int(s * 0.07))
 
-    # 飘扬的旗帜 (亮红色)
+    # 飘扬的鲜艳大红旗帜
     flag_pts = [
-        (pole_x, int(s * 0.12)),
-        (int(s * 0.86), int(s * 0.27)),
-        (pole_x, int(s * 0.46)),
+        (pole_x, int(s * 0.10)),
+        (int(s * 0.88), int(s * 0.28)),
+        (pole_x, int(s * 0.48)),
     ]
     pygame.draw.polygon(surf, (240, 45, 55), flag_pts)
-    pygame.draw.polygon(surf, (170, 20, 30), flag_pts, width=int(s * 0.03))
+    pygame.draw.polygon(surf, (160, 20, 30), flag_pts, width=int(s * 0.04))
 
     # 旗子中间小金星
     star_center = (int(s * 0.52), int(s * 0.28))
-    pygame.draw.circle(surf, (255, 235, 90), star_center, int(s * 0.06))
+    pygame.draw.circle(surf, (255, 230, 60), star_center, int(s * 0.07))
 
     return surf
 
 
+import os
+
 def create_player_sprites(size: int = 128) -> dict[str, list[pygame.Surface]]:
-    """生成大头萌系 Q 版小人角色的 4 个方向，每个方向 2 帧走动动画的 Surface。"""
+    """生成或加载大头萌系角色的 4 个方向，每个方向 2 帧走动动画的 Surface。"""
+    frames_dir = os.path.join(os.path.dirname(__file__), "assets", "mochi_frames")
+    if not os.path.exists(frames_dir):
+        frames_dir = "assets/mochi_frames"
+
+    if os.path.exists(frames_dir):
+        try:
+            sprites = {}
+            for d in ["down", "up", "left", "right"]:
+                frame_list = []
+                for idx in ["0", "1"]:
+                    path = os.path.join(frames_dir, f"{d}_{idx}.png")
+                    if os.path.exists(path):
+                        img = pygame.image.load(path)
+                        if pygame.display.get_surface() is not None:
+                            img = img.convert_alpha()
+                        scaled = pygame.transform.smoothscale(img, (size, size))
+                        frame_list.append(scaled)
+                if frame_list:
+                    sprites[d] = frame_list
+            if len(sprites) == 4:
+                return sprites
+        except Exception as e:
+            print(f"Warning: Failed to load mochi frames: {e}")
+
     sprites = {}
     directions = ["down", "up", "left", "right"]
 
@@ -231,81 +256,93 @@ def _draw_cute_character(size: int, facing: str, frame: int) -> pygame.Surface:
     s = size
 
     # 调色盘
-    c_skin = (255, 224, 196)       # 萌系粉白肤色
-    c_blush = (255, 140, 160)      # 萌萌粉红腮红
-    c_hair = (60, 40, 30)          # 深栗色头发
-    c_cap = (255, 80, 50)          # 鲜艳大红棒球帽/帽子
-    c_cap_brim = (230, 50, 30)     # 帽檐
-    c_shirt = (40, 160, 240)       # 亮红/亮蓝萌系卫衣
-    c_pants = (50, 60, 85)         # 藏青裤子
-    c_shoes = (255, 255, 255)      # 亮白运动小鞋
-    c_eye_bg = (25, 25, 35)        # 大眼珠
-    c_eye_sparkle = (255, 255, 255)# 水汪汪闪烁高光点
+    c_skin = (255, 230, 210)       # 嫩粉肤色
+    c_blush = (255, 140, 175)      # 萌萌红润腮红
+    c_hair = (90, 55, 45)          # 栗棕色头发
+    c_cap = (250, 82, 115)         # 草莓甜心帽子
+    c_cap_brim = (215, 55, 90)     # 帽檐
+    c_cap_ear = (215, 55, 90)      # 帽子猫耳/球球
+    c_shirt = (64, 173, 250)       # 晴空蓝小卫衣
+    c_pants = (50, 60, 95)         # 藏青裤子
+    c_shoes = (255, 250, 245)      # 亮白萌系鞋子
+    c_eye_bg = (20, 20, 40)        # 动漫大眼眶深色
+    c_eye_iris = (45, 148, 250)    # 水蓝色彩瞳
+    c_eye_sparkle = (255, 255, 255)# 双重闪烁高光
 
     # 比例结构 (Q版 1.5 头身：大头占绝大部分空间)
     center_x = s * 0.50
-    head_y = s * 0.36              # 大头中心
-    head_r = s * 0.28              # 超大圆形大头！
+    head_y = s * 0.37              # 大头中心
+    head_r = s * 0.30              # 超大圆形大头！
 
-    body_top = s * 0.58
-    body_h = s * 0.20
-    body_w = s * 0.32
+    body_top = s * 0.60
+    body_h = s * 0.18
+    body_w = s * 0.28
 
     leg_top = body_top + body_h
-    leg_h = s * 0.16
+    leg_h = s * 0.14
 
     # 脚步摆动偏移
-    leg_offset = (s * 0.08) if frame == 1 else (-s * 0.08)
+    leg_offset = (s * 0.07) if frame == 1 else (-s * 0.07)
 
     if facing == "down":
         # === 正面 (朝下) ===
         # 1. 裤子与小鞋子
-        left_foot = pygame.Rect(int(center_x - s * 0.13), int(leg_top + leg_offset * 0.4), int(s * 0.10), int(leg_h))
-        right_foot = pygame.Rect(int(center_x + s * 0.03), int(leg_top - leg_offset * 0.4), int(s * 0.10), int(leg_h))
+        left_foot = pygame.Rect(int(center_x - s * 0.12), int(leg_top + leg_offset * 0.4), int(s * 0.09), int(leg_h))
+        right_foot = pygame.Rect(int(center_x + s * 0.03), int(leg_top - leg_offset * 0.4), int(s * 0.09), int(leg_h))
         pygame.draw.rect(surf, c_pants, left_foot, border_radius=int(s * 0.03))
         pygame.draw.rect(surf, c_pants, right_foot, border_radius=int(s * 0.03))
-        # 亮白萌系小鞋
-        pygame.draw.rect(surf, c_shoes, (left_foot.left - int(s * 0.01), left_foot.bottom - int(s * 0.06), left_foot.width + int(s * 0.02), int(s * 0.06)), border_radius=int(s * 0.02))
-        pygame.draw.rect(surf, c_shoes, (right_foot.left - int(s * 0.01), right_foot.bottom - int(s * 0.06), right_foot.width + int(s * 0.02), int(s * 0.06)), border_radius=int(s * 0.02))
+        pygame.draw.rect(surf, c_shoes, (left_foot.left - int(s * 0.01), left_foot.bottom - int(s * 0.04), left_foot.width + int(s * 0.02), int(s * 0.05)), border_radius=int(s * 0.02))
+        pygame.draw.rect(surf, c_shoes, (right_foot.left - int(s * 0.01), right_foot.bottom - int(s * 0.04), right_foot.width + int(s * 0.02), int(s * 0.05)), border_radius=int(s * 0.02))
 
-        # 2. 身体上衣
+        # 2. 身体上衣与小手臂
         body_rect = pygame.Rect(int(center_x - body_w / 2), int(body_top), int(body_w), int(body_h))
         pygame.draw.rect(surf, c_shirt, body_rect, border_radius=int(s * 0.04))
 
-        # 小手臂
-        arm_l = pygame.Rect(int(body_rect.left - s * 0.06), int(body_top + s * 0.02 - leg_offset * 0.5), int(s * 0.07), int(s * 0.14))
-        arm_r = pygame.Rect(int(body_rect.right - s * 0.01), int(body_top + s * 0.02 + leg_offset * 0.5), int(s * 0.07), int(s * 0.14))
+        arm_l = pygame.Rect(int(body_rect.left - s * 0.05), int(body_top + s * 0.01 - leg_offset * 0.4), int(s * 0.06), int(s * 0.12))
+        arm_r = pygame.Rect(int(body_rect.right - s * 0.01), int(body_top + s * 0.01 + leg_offset * 0.4), int(s * 0.06), int(s * 0.12))
         pygame.draw.rect(surf, c_shirt, arm_l, border_radius=int(s * 0.03))
         pygame.draw.rect(surf, c_shirt, arm_r, border_radius=int(s * 0.03))
-        pygame.draw.circle(surf, c_skin, (arm_l.centerx, arm_l.bottom), int(s * 0.035))
-        pygame.draw.circle(surf, c_skin, (arm_r.centerx, arm_r.bottom), int(s * 0.035))
+        pygame.draw.circle(surf, c_skin, (arm_l.centerx, arm_l.bottom), int(s * 0.03))
+        pygame.draw.circle(surf, c_skin, (arm_r.centerx, arm_r.bottom), int(s * 0.03))
 
-        # 3. 超大头
+        # 3. 超大萌萌头
         pygame.draw.circle(surf, c_skin, (int(center_x), int(head_y)), int(head_r))
 
-        # 帽子 (鲜艳大红帽)
-        cap_rect = pygame.Rect(int(center_x - head_r * 1.05), int(head_y - head_r * 1.05), int(head_r * 2.1), int(head_r * 1.1))
-        pygame.draw.ellipse(surf, c_cap, cap_rect)
-        # 帽檐
-        brim_rect = pygame.Rect(int(center_x - head_r * 1.1), int(head_y - head_r * 0.15), int(head_r * 2.2), int(s * 0.08))
-        pygame.draw.ellipse(surf, c_cap_brim, brim_rect)
+        # 刘海
+        hair_l_pts = [(int(center_x - head_r * 0.9), int(head_y - head_r * 0.1)), (int(center_x - head_r * 0.3), int(head_y - head_r * 0.2)), (int(center_x - head_r * 0.6), int(head_y + head_r * 0.15))]
+        hair_r_pts = [(int(center_x + head_r * 0.9), int(head_y - head_r * 0.1)), (int(center_x + head_r * 0.3), int(head_y - head_r * 0.2)), (int(center_x + head_r * 0.6), int(head_y + head_r * 0.15))]
+        pygame.draw.polygon(surf, c_hair, hair_l_pts)
+        pygame.draw.polygon(surf, c_hair, hair_r_pts)
+
+        # 帽子与猫耳球球
+        pygame.draw.circle(surf, c_cap, (int(center_x), int(head_y - head_r * 0.35)), int(head_r * 0.88))
+        pygame.draw.circle(surf, c_cap_ear, (int(center_x - head_r * 0.6), int(head_y - head_r * 0.9)), int(s * 0.07))
+        pygame.draw.circle(surf, c_cap_ear, (int(center_x + head_r * 0.6), int(head_y - head_r * 0.9)), int(s * 0.07))
 
         # 腮红 (粉红小圈)
-        pygame.draw.circle(surf, c_blush, (int(center_x - s * 0.15), int(head_y + s * 0.10)), int(s * 0.045))
-        pygame.draw.circle(surf, c_blush, (int(center_x + s * 0.15), int(head_y + s * 0.10)), int(s * 0.045))
+        pygame.draw.circle(surf, c_blush, (int(center_x - s * 0.16), int(head_y + s * 0.09)), int(s * 0.05))
+        pygame.draw.circle(surf, c_blush, (int(center_x + s * 0.16), int(head_y + s * 0.09)), int(s * 0.05))
 
-        # 萌萌水汪汪大眼睛
-        eye_l_center = (int(center_x - s * 0.10), int(head_y + s * 0.04))
-        eye_r_center = (int(center_x + s * 0.10), int(head_y + s * 0.04))
-        pygame.draw.circle(surf, c_eye_bg, eye_l_center, int(s * 0.045))
-        pygame.draw.circle(surf, c_eye_bg, eye_r_center, int(s * 0.045))
-        # 高光点
-        pygame.draw.circle(surf, c_eye_sparkle, (eye_l_center[0] - int(s * 0.012), eye_l_center[1] - int(s * 0.012)), int(s * 0.018))
-        pygame.draw.circle(surf, c_eye_sparkle, (eye_r_center[0] - int(s * 0.012), eye_r_center[1] - int(s * 0.012)), int(s * 0.018))
+        # 动漫超级水汪汪大眼睛 (大框架 + 蓝彩瞳 + 主/副双重闪烁高光)
+        eye_lw = pygame.Rect(int(center_x - s * 0.165), int(head_y - s * 0.01), int(s * 0.13), int(s * 0.085))
+        eye_rw = pygame.Rect(int(center_x + s * 0.035), int(head_y - s * 0.01), int(s * 0.13), int(s * 0.085))
+        pygame.draw.rect(surf, c_eye_bg, eye_lw, border_radius=int(s * 0.03))
+        pygame.draw.rect(surf, c_eye_bg, eye_rw, border_radius=int(s * 0.03))
+
+        # 彩瞳
+        pygame.draw.rect(surf, c_eye_iris, (eye_lw.left + int(s * 0.015), eye_lw.top + int(s * 0.02), int(s * 0.10), int(s * 0.05)), border_radius=int(s * 0.02))
+        pygame.draw.rect(surf, c_eye_iris, (eye_rw.left + int(s * 0.015), eye_rw.top + int(s * 0.02), int(s * 0.10), int(s * 0.05)), border_radius=int(s * 0.02))
+
+        # 主高光
+        pygame.draw.circle(surf, c_eye_sparkle, (eye_lw.left + int(s * 0.035), eye_lw.top + int(s * 0.02)), int(s * 0.024))
+        pygame.draw.circle(surf, c_eye_sparkle, (eye_rw.left + int(s * 0.035), eye_rw.top + int(s * 0.02)), int(s * 0.024))
+        # 副高光
+        pygame.draw.circle(surf, c_eye_sparkle, (eye_lw.right - int(s * 0.035), eye_lw.bottom - int(s * 0.02)), int(s * 0.013))
+        pygame.draw.circle(surf, c_eye_sparkle, (eye_rw.right - int(s * 0.035), eye_rw.bottom - int(s * 0.02)), int(s * 0.013))
 
         # 萌可爱笑脸
-        smile_rect = pygame.Rect(int(center_x - s * 0.04), int(head_y + s * 0.11), int(s * 0.08), int(s * 0.05))
-        pygame.draw.arc(surf, (80, 50, 40), smile_rect, math.pi, 2 * math.pi, int(s * 0.025))
+        smile_rect = pygame.Rect(int(center_x - s * 0.04), int(head_y + s * 0.10), int(s * 0.08), int(s * 0.05))
+        pygame.draw.arc(surf, (110, 50, 60), smile_rect, math.pi, 2 * math.pi, int(s * 0.025))
 
     elif facing == "up":
         # === 背面 (朝上) ===
@@ -363,12 +400,14 @@ def _draw_cute_character(size: int, facing: str, frame: int) -> pygame.Surface:
         pygame.draw.ellipse(surf, c_cap_brim, brim_rect)
 
         # 侧粉红腮红
-        pygame.draw.circle(surf, c_blush, (int(center_x - s * 0.14), int(head_y + s * 0.10)), int(s * 0.045))
+        pygame.draw.circle(surf, c_blush, (int(center_x - s * 0.14), int(head_y + s * 0.09)), int(s * 0.05))
 
-        # 侧萌萌大眼睛
-        eye_center = (int(center_x - s * 0.12), int(head_y + s * 0.04))
-        pygame.draw.circle(surf, c_eye_bg, eye_center, int(s * 0.045))
-        pygame.draw.circle(surf, c_eye_sparkle, (eye_center[0] - int(s * 0.012), eye_center[1] - int(s * 0.012)), int(s * 0.018))
+        # 侧萌萌水汪汪大眼睛
+        eye_w = pygame.Rect(int(center_x - s * 0.165), int(head_y - s * 0.01), int(s * 0.13), int(s * 0.085))
+        pygame.draw.rect(surf, c_eye_bg, eye_w, border_radius=int(s * 0.03))
+        pygame.draw.rect(surf, c_eye_iris, (eye_w.left + int(s * 0.015), eye_w.top + int(s * 0.02), int(s * 0.10), int(s * 0.05)), border_radius=int(s * 0.02))
+        pygame.draw.circle(surf, c_eye_sparkle, (eye_w.left + int(s * 0.035), eye_w.top + int(s * 0.02)), int(s * 0.024))
+        pygame.draw.circle(surf, c_eye_sparkle, (eye_w.right - int(s * 0.035), eye_w.bottom - int(s * 0.02)), int(s * 0.013))
 
     elif facing == "right":
         # === 侧面 (朝右) ===
@@ -399,11 +438,13 @@ def _draw_cute_character(size: int, facing: str, frame: int) -> pygame.Surface:
         pygame.draw.ellipse(surf, c_cap_brim, brim_rect)
 
         # 侧粉红腮红
-        pygame.draw.circle(surf, c_blush, (int(center_x + s * 0.14), int(head_y + s * 0.10)), int(s * 0.045))
+        pygame.draw.circle(surf, c_blush, (int(center_x + s * 0.14), int(head_y + s * 0.09)), int(s * 0.05))
 
-        # 侧萌萌大眼睛
-        eye_center = (int(center_x + s * 0.12), int(head_y + s * 0.04))
-        pygame.draw.circle(surf, c_eye_bg, eye_center, int(s * 0.045))
-        pygame.draw.circle(surf, c_eye_sparkle, (eye_center[0] - int(s * 0.012), eye_center[1] - int(s * 0.012)), int(s * 0.018))
+        # 侧萌萌水汪汪大眼睛
+        eye_w = pygame.Rect(int(center_x + s * 0.035), int(head_y - s * 0.01), int(s * 0.13), int(s * 0.085))
+        pygame.draw.rect(surf, c_eye_bg, eye_w, border_radius=int(s * 0.03))
+        pygame.draw.rect(surf, c_eye_iris, (eye_w.left + int(s * 0.015), eye_w.top + int(s * 0.02), int(s * 0.10), int(s * 0.05)), border_radius=int(s * 0.02))
+        pygame.draw.circle(surf, c_eye_sparkle, (eye_w.left + int(s * 0.035), eye_w.top + int(s * 0.02)), int(s * 0.024))
+        pygame.draw.circle(surf, c_eye_sparkle, (eye_w.right - int(s * 0.035), eye_w.bottom - int(s * 0.02)), int(s * 0.013))
 
     return surf
