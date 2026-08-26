@@ -11,36 +11,146 @@ script = ExtResource("1_script")
 anchors_preset = 10
 anchor_right = 1.0
 offset_left = 12.0
-offset_top = 10.0
-offset_right = -12.0
-offset_bottom = 52.0
+offset_top = 8.0
+offset_right = -272.0
+offset_bottom = 48.0
 grow_horizontal = 2
 
 [node name="HUDLabel" type="Label" parent="CanvasLayer/HUDMargin"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.92, 0.94, 1)
 theme_override_font_sizes/font_size = 14
-text = "初始化迷宫..."
+text = "🎮 迷宫大冒险"
 vertical_alignment = 1
 
-[node name="WinBanner" type="PanelContainer" parent="CanvasLayer"]
-visible = false
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -220.0
-offset_top = -50.0
-offset_right = 220.0
-offset_bottom = 50.0
-grow_horizontal = 2
+[node name="Sidebar" type="PanelContainer" parent="CanvasLayer"]
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -260.0
+grow_horizontal = 0
 grow_vertical = 2
 
-[node name="WinLabel" type="Label" parent="CanvasLayer/WinBanner"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/Sidebar"]
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 0.3, 1)
-theme_override_font_sizes/font_size = 20
-text = "到达出口！按 R 再来一局"
-horizontal_alignment = 1
-vertical_alignment = 1
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="VBox" type="VBoxContainer" parent="CanvasLayer/Sidebar/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ScoreCard" type="PanelContainer" parent="CanvasLayer/Sidebar/Margin/VBox"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/Sidebar/Margin/VBox/ScoreCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="CanvasLayer/Sidebar/Margin/VBox/ScoreCard/Margin"]
+layout_mode = 2
+
+[node name="ScoreTitle" type="Label" parent="CanvasLayer/Sidebar/Margin/VBox/ScoreCard/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.88, 0.3, 1)
+theme_override_font_sizes/font_size = 18
+text = "🏆 记分牌"
+
+[node name="TotalScoreLabel" type="Label" parent="CanvasLayer/Sidebar/Margin/VBox/ScoreCard/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.95, 0.6, 1)
+theme_override_font_sizes/font_size = 14
+text = "累计总分: 0 分"
+
+[node name="LastScoreLabel" type="Label" parent="CanvasLayer/Sidebar/Margin/VBox/ScoreCard/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.95, 0.6, 1)
+theme_override_font_sizes/font_size = 13
+text = "本局得分: --"
+
+[node name="LevelCard" type="PanelContainer" parent="CanvasLayer/Sidebar/Margin/VBox"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/Sidebar/Margin/VBox/LevelCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="CanvasLayer/Sidebar/Margin/VBox/LevelCard/Margin"]
+layout_mode = 2
+
+[node name="LevelLabel" type="Label" parent="CanvasLayer/Sidebar/Margin/VBox/LevelCard/Margin/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "当前关卡: 5 阶"
+
+[node name="PointsInfoLabel" type="Label" parent="CanvasLayer/Sidebar/Margin/VBox/LevelCard/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.82, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "通关: +500分 | 破纪录: +1000分"
+
+[node name="TimerCard" type="PanelContainer" parent="CanvasLayer/Sidebar/Margin/VBox"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/Sidebar/Margin/VBox/TimerCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="CanvasLayer/Sidebar/Margin/VBox/TimerCard/Margin"]
+layout_mode = 2
+
+[node name="TimeLabel" type="Label" parent="CanvasLayer/Sidebar/Margin/VBox/TimerCard/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.5, 1)
+theme_override_font_sizes/font_size = 14
+text = "当前用时: 按方向键开始"
+
+[node name="BestLabel" type="Label" parent="CanvasLayer/Sidebar/Margin/VBox/TimerCard/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.85, 1, 1)
+theme_override_font_sizes/font_size = 13
+text = "最佳纪录: 无纪录"
+
+[node name="StatusCard" type="PanelContainer" parent="CanvasLayer/Sidebar/Margin/VBox"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/Sidebar/Margin/VBox/StatusCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="StatusLabel" type="Label" parent="CanvasLayer/Sidebar/Margin/VBox/StatusCard/Margin"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "🟢 正在闯关中...\n避开大灰狼到达小屋"
+
+[node name="HelpCard" type="PanelContainer" parent="CanvasLayer/Sidebar/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/Sidebar/Margin/VBox/HelpCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="HelpLabel" type="Label" parent="CanvasLayer/Sidebar/Margin/VBox/HelpCard/Margin"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.65, 0.75, 1)
+theme_override_font_sizes/font_size = 12
+text = "🕹️ 快捷键指南:\nWASD/方向键 : 移动\n1-9/0 : 选阶  +/- : 难度\nR : 重随  P : 换外观\nF : 大灰狼  C : 视角"

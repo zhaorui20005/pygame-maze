@@ -2,7 +2,8 @@
 extends Node2D
 
 const CELL_SIZE = 26.0
-const HUD_HEIGHT = 52.0
+const HUD_HEIGHT = 48.0
+const SIDEBAR_WIDTH = 260.0
 
 var difficulty_level: int = 5
 var maze_data: MazeGenerator.MazeData = null
@@ -51,16 +52,24 @@ var wolf_trail: Array = []
 var wolf_crying: bool = false
 var wolf_speed: float = 90.0
 
-# 计时器与最佳纪录
+# 计时器与最佳纪录及积分
 var timer_started: bool = false
 var start_time_msec: int = 0
 var current_time_sec: float = 0.0
 var best_records: Dictionary = {}
+var total_score: int = 0
+var last_round_score: int = 0
+var score_doubled: bool = false
 
 # UI Label
 @onready var hud_label: Label = $CanvasLayer/HUDMargin/HUDLabel
-@onready var win_banner: Control = $CanvasLayer/WinBanner
-@onready var win_label: Label = $CanvasLayer/WinBanner/WinLabel
+@onready var total_score_label: Label = $CanvasLayer/Sidebar/Margin/VBox/ScoreCard/Margin/VBox/TotalScoreLabel
+@onready var last_score_label: Label = $CanvasLayer/Sidebar/Margin/VBox/ScoreCard/Margin/VBox/LastScoreLabel
+@onready var level_label: Label = $CanvasLayer/Sidebar/Margin/VBox/LevelCard/Margin/VBox/LevelLabel
+@onready var points_info_label: Label = $CanvasLayer/Sidebar/Margin/VBox/LevelCard/Margin/VBox/PointsInfoLabel
+@onready var time_label: Label = $CanvasLayer/Sidebar/Margin/VBox/TimerCard/Margin/VBox/TimeLabel
+@onready var best_label: Label = $CanvasLayer/Sidebar/Margin/VBox/TimerCard/Margin/VBox/BestLabel
+@onready var status_label: Label = $CanvasLayer/Sidebar/Margin/VBox/StatusCard/Margin/StatusLabel
 
 func _ready() -> void:
 	_load_best_records()
@@ -150,7 +159,6 @@ func _start_new_game(level: int) -> void:
 	timer_started = false
 	start_time_msec = 0
 	current_time_sec = 0.0
-	win_banner.hide()
 
 	if audio_start_player != null:
 		audio_start_player.play()
@@ -169,8 +177,10 @@ func _start_new_game(level: int) -> void:
 	queue_redraw()
 
 func fit_to_screen() -> void:
+	if maze_data == null:
+		return
 	var win_size = get_viewport_rect().size
-	var avail_w = win_size.x
+	var avail_w = max(1.0, win_size.x - SIDEBAR_WIDTH)
 	var avail_h = max(1.0, win_size.y - HUD_HEIGHT)
 	var mw = maze_data.cols * CELL_SIZE
 	var mh = maze_data.rows * CELL_SIZE
@@ -196,8 +206,9 @@ func _update_player_focus() -> void:
 	if not following_player:
 		return
 	var win_size = get_viewport_rect().size
+	var avail_w = max(1.0, win_size.x - SIDEBAR_WIDTH)
 	var avail_h = max(1.0, win_size.y - HUD_HEIGHT)
-	var vc_x = win_size.x / 2.0
+	var vc_x = avail_w / 2.0
 	var vc_y = HUD_HEIGHT + avail_h / 2.0
 	offset_pos.x = vc_x - (player.pixel_position.x + player.size / 2.0) * camera_scale
 	offset_pos.y = vc_y - (player.pixel_position.y + player.size / 2.0) * camera_scale
@@ -249,9 +260,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					audio_wolf_player.play()
 
 	elif event is InputEventMouseButton:
+		var win_size = get_viewport_rect().size
 		if event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
 			if event.pressed:
-				if event.position.y > HUD_HEIGHT:
+				if event.position.x < win_size.x - SIDEBAR_WIDTH and event.position.y > HUD_HEIGHT:
 					is_dragging = true
 					drag_start_mouse = event.position
 					drag_start_offset = offset_pos
@@ -259,10 +271,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				is_dragging = false
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			if event.position.y > HUD_HEIGHT:
+			if event.position.x < win_size.x - SIDEBAR_WIDTH and event.position.y > HUD_HEIGHT:
 				_zoom(1.15, event.position)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			if event.position.y > HUD_HEIGHT:
+			if event.position.x < win_size.x - SIDEBAR_WIDTH and event.position.y > HUD_HEIGHT:
 				_zoom(1.0 / 1.15, event.position)
 
 	elif event is InputEventMouseMotion and is_dragging:
@@ -338,8 +350,9 @@ func _physics_process(delta: float) -> void:
 			# 检查大灰狼是否抓到玩家
 			if wolf_pos.distance_to(p_center) < CELL_SIZE * 0.65:
 				caught_by_wolf = true
-				win_label.text = "😱 被大灰狼抓住了！\n按 R 重新开始"
-				win_banner.show()
+				last_round_score = 0
+				score_doubled = false
+				_update_hud()
 				if audio_caught_player != null:
 					audio_caught_player.play()
 
@@ -358,17 +371,17 @@ func _physics_process(delta: float) -> void:
 			if not has_prev or current_time_sec < prev_best:
 				is_new_record = true
 				best_records[difficulty_level] = current_time_sec
-				_save_best_records()
 
+			var base_score = difficulty_level * 100
 			if is_new_record:
-				if not has_prev:
-					win_label.text = "🎉 产生首个新纪录！\n用时: %.2f 秒\n按 R 再来一局" % current_time_sec
-				else:
-					win_label.text = "🏆 恭喜打破新纪录！\n用时: %.2f 秒 (旧纪录: %.2f 秒)\n按 R 再来一局" % [current_time_sec, prev_best]
+				last_round_score = base_score * 2
+				score_doubled = true
 			else:
-				win_label.text = "到达出口！\n用时: %.2f 秒 (最佳纪录: %.2f 秒)\n按 R 再来一局" % [current_time_sec, prev_best]
+				last_round_score = base_score
+				score_doubled = false
 
-			win_banner.show()
+			total_score += last_round_score
+			_save_best_records()
 			_update_hud()
 
 			if audio_win_player != null:
@@ -394,12 +407,45 @@ func _update_hud() -> void:
 	if maze_data == null or maze_data.metrics == null:
 		return
 	var m = maze_data.metrics
-	var best_str = ("%.2f秒" % best_records[difficulty_level]) if best_records.has(difficulty_level) else "无纪录"
-	var time_str = ("%.2f秒" % current_time_sec) if timer_started else "按方向键开始"
+	hud_label.text = "🎮 迷宫大冒险 (%s阶) | 路径 %d 死胡同 %d" % [m.label, m.path_length, m.dead_ends]
 
-	hud_label.text = "难度 %s阶 | 用时: %s  最佳纪录: %s    路径 %d 死胡同 %d    WASD移动 1-9/0选阶 +/-切换 R重随 P切换角色 F召唤大灰狼 C视角" % [
-		m.label, time_str, best_str, m.path_length, m.dead_ends
-	]
+	if total_score_label != null:
+		total_score_label.text = "累计总分: %d 分" % total_score
+
+	if last_score_label != null:
+		if last_round_score > 0:
+			var d_str = " (破纪录翻倍!)" if score_doubled else ""
+			last_score_label.text = "本局得分: +%d 分%s" % [last_round_score, d_str]
+		elif caught_by_wolf:
+			last_score_label.text = "本局得分: 0 分 (被狼抓)"
+		else:
+			last_score_label.text = "本局得分: --"
+
+	if level_label != null:
+		level_label.text = "当前关卡: %s 阶" % m.label
+
+	if points_info_label != null:
+		var base_pts = difficulty_level * 100
+		points_info_label.text = "通关: +%d分 | 破纪录: +%d分" % [base_pts, base_pts * 2]
+
+	if time_label != null:
+		var time_str = ("%.2f 秒" % current_time_sec) if timer_started else "按方向键开始"
+		time_label.text = "当前用时: %s" % time_str
+
+	if best_label != null:
+		var best_str = ("%.2f 秒" % best_records[difficulty_level]) if best_records.has(difficulty_level) else "无纪录"
+		best_label.text = "最佳纪录: %s" % best_str
+
+	if status_label != null:
+		if won:
+			if score_doubled:
+				status_label.text = "🎉 成功通关！\n获得积分: +%d 分\n🏆 破纪录积分翻倍！\n👉 按 R 键继续下一局" % last_round_score
+			else:
+				status_label.text = "🎉 成功通关！\n获得积分: +%d 分\n再接再厉，挑战更快速度！\n👉 按 R 键继续下一局" % last_round_score
+		elif caught_by_wolf:
+			status_label.text = "😱 被大灰狼抓住了！\n本局得分: 0 分\n👉 按 R 键重新开始"
+		else:
+			status_label.text = "🟢 正在闯关中...\n避开大灰狼到达小屋\n挑战用时最快纪录！"
 
 func _load_best_records() -> void:
 	var path = "user://best_records.json"
@@ -411,7 +457,10 @@ func _load_best_records() -> void:
 				var data = json.get_data()
 				if data is Dictionary:
 					for k in data.keys():
-						best_records[int(k)] = float(data[k])
+						if str(k) == "total_score":
+							total_score = int(data[k])
+						else:
+							best_records[int(k)] = float(data[k])
 
 func _save_best_records() -> void:
 	var file = FileAccess.open("user://best_records.json", FileAccess.WRITE)
@@ -419,6 +468,7 @@ func _save_best_records() -> void:
 		var data = {}
 		for k in best_records.keys():
 			data[str(k)] = float(best_records[k])
+		data["total_score"] = total_score
 		file.store_string(JSON.stringify(data))
 
 func _draw() -> void:
@@ -426,13 +476,14 @@ func _draw() -> void:
 		return
 
 	var win_size = get_viewport_rect().size
+	var maze_w = win_size.x - SIDEBAR_WIDTH
 
 	# 背景填充
 	draw_rect(Rect2(Vector2.ZERO, win_size), COLOR_BG)
 
 	# 瓦片绘制范围裁剪
 	var min_wx = (0.0 - offset_pos.x) / camera_scale
-	var max_wx = (win_size.x - offset_pos.x) / camera_scale
+	var max_wx = (maze_w - offset_pos.x) / camera_scale
 	var min_wy = (HUD_HEIGHT - offset_pos.y) / camera_scale
 	var max_wy = (win_size.y - offset_pos.y) / camera_scale
 
@@ -459,7 +510,7 @@ func _draw() -> void:
 	_draw_wolf()
 
 	# HUD 顶栏背景
-	draw_rect(Rect2(0, 0, win_size.x, HUD_HEIGHT), COLOR_HUD_BG)
+	draw_rect(Rect2(0, 0, maze_w, HUD_HEIGHT), COLOR_HUD_BG)
 
 func _draw_tile_marker(tile: Vector2i, color: Color, type: String) -> void:
 	var p1 = offset_pos + Vector2(tile.x * CELL_SIZE, tile.y * CELL_SIZE) * camera_scale

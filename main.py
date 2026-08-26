@@ -9,22 +9,33 @@ import sys
 
 RECORDS_FILE = "best_records.json"
 
-def _load_best_records() -> dict[int, float]:
+
+def _load_best_records() -> tuple[dict[int, float], int]:
+    records: dict[int, float] = {}
+    total_score: int = 0
     if os.path.exists(RECORDS_FILE):
         try:
             with open(RECORDS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return {int(k): float(v) for k, v in data.items()}
+                for k, v in data.items():
+                    if k == "total_score":
+                        total_score = int(v)
+                    else:
+                        records[int(k)] = float(v)
         except Exception as e:
             print(f"Warning: failed to load best records: {e}")
-    return {}
+    return records, total_score
 
-def _save_best_records(records: dict[int, float]) -> None:
+
+def _save_best_records(records: dict[int, float], total_score: int) -> None:
     try:
+        data = {str(k): v for k, v in records.items()}
+        data["total_score"] = total_score
         with open(RECORDS_FILE, "w", encoding="utf-8") as f:
-            json.dump({str(k): v for k, v in records.items()}, f, indent=2)
+            json.dump(data, f, indent=2)
     except Exception as e:
         print(f"Warning: failed to save best records: {e}")
+
 
 import pygame
 
@@ -45,7 +56,8 @@ from maze import Maze, assert_perfect_maze, generate_maze
 from player import Player
 
 CELL_SIZE = 26  # 房间变大后略缩小格子，尽量仍能在常见分辨率下完整显示
-HUD_HEIGHT = 52
+HUD_HEIGHT = 48
+SIDEBAR_WIDTH = 260  # 右侧独立记分牌与状态面板宽度
 FPS = 60
 PLAYER_INSET = 6  # 角色比格子小一圈，转弯时不容易被墙角卡住
 
@@ -123,9 +135,9 @@ class Camera:
         self.drag_start_offset = (0.0, 0.0)
 
     def fit_maze(self, maze: Maze, screen: pygame.Surface) -> None:
-        """根据当前窗口尺寸，计算自动缩放比例，使地图紧贴 HUD 正下方且完整显示。"""
+        """根据当前窗口尺寸，计算自动缩放比例，使地图紧贴 HUD 正下方且在左侧区域完整显示。"""
         sw, sh = screen.get_size()
-        avail_w = sw
+        avail_w = max(1, sw - SIDEBAR_WIDTH)
         avail_h = max(1, sh - HUD_HEIGHT)
         mw = maze.cols * CELL_SIZE
         mh = maze.rows * CELL_SIZE
@@ -139,7 +151,7 @@ class Camera:
         scaled_w = mw * self.scale
         scaled_h = mh * self.scale
 
-        # 水平居中，垂直紧贴 HUD 正下方对齐
+        # 左侧视口内居中，垂直紧贴 HUD 正下方对齐
         self.offset_x = max(8.0, (avail_w - scaled_w) / 2.0)
         self.offset_y = HUD_HEIGHT + max(8.0, (avail_h - scaled_h) / 2.0) if avail_h > scaled_h else float(HUD_HEIGHT)
         self.following_player = False
@@ -154,8 +166,9 @@ class Camera:
         if not self.following_player:
             return
         sw, sh = screen.get_size()
+        avail_w = max(1, sw - SIDEBAR_WIDTH)
         avail_h = max(1, sh - HUD_HEIGHT)
-        vc_x = sw / 2.0
+        vc_x = avail_w / 2.0
         vc_y = HUD_HEIGHT + avail_h / 2.0
         self.offset_x = vc_x - player.rect.centerx * self.scale
         self.offset_y = vc_y - player.rect.centery * self.scale
@@ -246,7 +259,7 @@ def _window_size(maze: Maze) -> tuple[int, int]:
     except Exception:
         screen_w, screen_h = 1280, 800
 
-    desired_w = max(maze.cols * CELL_SIZE + 16, 880)
+    desired_w = max(maze.cols * CELL_SIZE + SIDEBAR_WIDTH + 16, 880)
     desired_h = maze.rows * CELL_SIZE + HUD_HEIGHT + 16
 
     # 限制窗口最大宽高，留出桌面任务栏/菜单栏空间
@@ -405,14 +418,15 @@ def main() -> None:
     caught_by_wolf = False
 
     # 计时器与纪录管理
-    best_records = _load_best_records()
+    best_records, total_score = _load_best_records()
+    last_round_score = 0
+    score_doubled = False
     timer_started = False
     start_time_ms = 0
     current_time_sec = 0.0
-    win_message_lines = []
 
     def reset_level_state():
-        nonlocal maze, screen, player, wolf, camera, won, caught_by_wolf, timer_started, start_time_ms, current_time_sec, win_message_lines
+        nonlocal maze, screen, player, wolf, camera, won, caught_by_wolf, timer_started, start_time_ms, current_time_sec
         maze = _make_maze(str(difficulty_level))
         screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
         player = _spawn_player(maze)
@@ -423,7 +437,6 @@ def main() -> None:
         timer_started = False
         start_time_ms = 0
         current_time_sec = 0.0
-        win_message_lines = []
         if sound_start:
             sound_start.play()
 
@@ -471,7 +484,7 @@ def main() -> None:
             elif event.type != pygame.KEYDOWN and _is_reroll_event(event):
                 reset_level_state()
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.pos[1] > HUD_HEIGHT:
+                if event.pos[0] < screen.get_width() - SIDEBAR_WIDTH and event.pos[1] > HUD_HEIGHT:
                     if event.button in (1, 2, 3):
                         camera.start_drag(event.pos)
                     elif event.button == 4:
@@ -486,7 +499,7 @@ def main() -> None:
                     camera.update_drag(event.pos)
             elif event.type == pygame.MOUSEWHEEL:
                 mx, my = pygame.mouse.get_pos()
-                if my > HUD_HEIGHT:
+                if mx < screen.get_width() - SIDEBAR_WIDTH and my > HUD_HEIGHT:
                     factor = 1.15 if event.y > 0 else (1 / 1.15 if event.y < 0 else 1.0)
                     if factor != 1.0:
                         camera.zoom(factor, (mx, my))
@@ -515,7 +528,8 @@ def main() -> None:
                 # 检查大灰狼是否抓到玩家
                 if math.hypot(wolf.x - player.rect.centerx, wolf.y - player.rect.centery) < CELL_SIZE * 0.65:
                     caught_by_wolf = True
-                    win_message_lines = ["😱 被大灰狼抓住了！", "按 R 重新开始"]
+                    last_round_score = 0
+                    score_doubled = False
                     if sound_caught:
                         sound_caught.play()
 
@@ -534,15 +548,17 @@ def main() -> None:
                 if not has_prev or current_time_sec < prev_best:
                     is_new_record = True
                     best_records[difficulty_level] = current_time_sec
-                    _save_best_records(best_records)
 
+                base_score = difficulty_level * 100
                 if is_new_record:
-                    if not has_prev:
-                        win_message_lines = [f"🎉 产生首个新纪录！", f"用时: {current_time_sec:.2f} 秒", "按 R 再来一局"]
-                    else:
-                        win_message_lines = [f"🏆 恭喜打破新纪录！", f"用时: {current_time_sec:.2f} 秒 (旧纪录: {prev_best:.2f} 秒)", "按 R 再来一局"]
+                    last_round_score = base_score * 2
+                    score_doubled = True
                 else:
-                    win_message_lines = ["到达出口！", f"用时: {current_time_sec:.2f} 秒 (最佳纪录: {prev_best:.2f} 秒)", "按 R 再来一局"]
+                    last_round_score = base_score
+                    score_doubled = False
+
+                total_score += last_round_score
+                _save_best_records(best_records, total_score)
 
                 if sound_win:
                     sound_win.play()
@@ -550,10 +566,11 @@ def main() -> None:
             if camera.following_player:
                 camera.update_player_focus(player, screen)
             else:
-                # 检查玩家坐标是否离开视口区域
+                # 检查玩家坐标是否离开左侧视口区域
                 sw, sh = screen.get_size()
+                maze_w = sw - SIDEBAR_WIDTH
                 psx, psy = camera.world_to_screen(player.rect.centerx, player.rect.centery)
-                if not (0 <= psx <= sw and HUD_HEIGHT <= psy <= sh):
+                if not (0 <= psx <= maze_w and HUD_HEIGHT <= psy <= sh):
                     if camera.scale <= camera.fit_scale * 1.05:
                         camera.fit_maze(maze, screen)
                     else:
@@ -580,7 +597,9 @@ def main() -> None:
             best_records,
             timer_started,
             current_time_sec,
-            win_message_lines,
+            total_score,
+            last_round_score,
+            score_doubled,
         )
         pygame.display.flip()
         clock.tick(FPS)
@@ -607,16 +626,19 @@ def _draw(
     best_records: dict[int, float],
     timer_started: bool,
     current_time_sec: float,
-    win_message_lines: list[str],
+    total_score: int,
+    last_round_score: int,
+    score_doubled: bool,
 ) -> None:
     screen.fill(COLOR_BG)
     screen_w, screen_h = screen.get_size()
+    maze_w = screen_w - SIDEBAR_WIDTH
 
     scale = camera.scale
 
-    # 计算视口覆盖的世界坐标范围，进行视口裁剪
+    # 1. 计算左侧迷宫视口覆盖的世界坐标范围，进行视口裁剪
     min_wx = (0 - camera.offset_x) / scale
-    max_wx = (screen_w - camera.offset_x) / scale
+    max_wx = (maze_w - camera.offset_x) / scale
     min_wy = (HUD_HEIGHT - camera.offset_y) / scale
     max_wy = (screen_h - camera.offset_y) / scale
 
@@ -712,60 +734,182 @@ def _draw(
             scaled_wolf = pygame.transform.smoothscale(cur_w_sprite, (wolf_draw_rect.w, wolf_draw_rect.h))
             screen.blit(scaled_wolf, wolf_draw_rect.topleft)
 
-    # HUD 区域 (覆盖在迷宫顶部，显示精确到 0.01 秒的用时与最佳纪录)
-    pygame.draw.rect(screen, COLOR_BG, (0, 0, screen_w, HUD_HEIGHT))
+    # 2. 绘制顶部 HUD 栏
+    pygame.draw.rect(screen, (14, 18, 28), (0, 0, maze_w, HUD_HEIGHT))
+    pygame.draw.line(screen, (38, 52, 74), (0, HUD_HEIGHT), (maze_w, HUD_HEIGHT), 1)
+
     m = maze.metrics
-    best_sec = best_records.get(difficulty_level)
-    best_str = f"{best_sec:.2f}秒" if best_sec is not None else "无纪录"
-    time_str = f"{current_time_sec:.2f}秒" if timer_started else "按方向键开始"
+    hud = f"🎮 迷宫大冒险 ({m.label}阶) | 路径 {m.path_length} 死胡同 {m.dead_ends}"
+    screen.blit(font.render(hud, True, COLOR_HUD), (12, 14))
 
-    hud = (
-        f"难度 {m.label}阶 | 用时: {time_str}  最佳纪录: {best_str}    "
-        f"路径 {m.path_length} 死胡同 {m.dead_ends}    "
-        "WASD移动 1-9/0选阶 +/-切换 R重随 P切换角色 F召唤大灰狼 C视角"
+    # 3. 绘制右侧独立记分牌与状态面板 (提示字样在侧边显示，完全不遮挡地图)
+    _draw_sidebar(
+        screen,
+        font,
+        big_font,
+        difficulty_level,
+        best_records,
+        timer_started,
+        current_time_sec,
+        won,
+        caught_by_wolf,
+        total_score,
+        last_round_score,
+        score_doubled,
     )
-    screen.blit(font.render(hud, True, COLOR_HUD), (10, 16))
-
-    if won or caught_by_wolf:
-        _draw_win_banner(screen, big_font, font, win_message_lines)
 
 
-def _draw_win_banner(
+def _draw_sidebar(
     screen: pygame.Surface,
+    font: pygame.font.Font,
     big_font: pygame.font.Font,
-    small_font: pygame.font.Font,
-    lines: list[str],
+    difficulty_level: int,
+    best_records: dict[int, float],
+    timer_started: bool,
+    current_time_sec: float,
+    won: bool,
+    caught_by_wolf: bool,
+    total_score: int,
+    last_round_score: int,
+    score_doubled: bool,
 ) -> None:
-    """通关与纪录提示弹窗：深红底 + 亮黄字。"""
-    if not lines:
-        lines = ["到达出口！按 R 再来一局"]
+    """右侧独立记分牌面板：包含总得分、关卡分值、计时纪录、通关/被抓提示卡片与快捷键指南。"""
+    sw, sh = screen.get_size()
+    sb_x = sw - SIDEBAR_WIDTH
+    sb_w = SIDEBAR_WIDTH
 
-    rendered_surfs = []
-    total_h = 0
-    max_w = 0
-    for i, line in enumerate(lines):
-        f = big_font if i == 0 else small_font
-        color = COLOR_WIN if i == 0 else (255, 255, 220)
-        s = f.render(line, True, color)
-        rendered_surfs.append(s)
-        total_h += s.get_height() + 6
-        if s.get_width() > max_w:
-            max_w = s.get_width()
+    # 1. 侧边栏整体背景与左分隔线
+    sidebar_rect = pygame.Rect(sb_x, 0, sb_w, sh)
+    pygame.draw.rect(screen, (16, 22, 34), sidebar_rect)
+    pygame.draw.line(screen, (38, 52, 74), (sb_x, 0), (sb_x, sh), 2)
 
-    banner_w = max_w + 48
-    banner_h = total_h + 20
-    cx = screen.get_width() // 2
-    cy = HUD_HEIGHT + 70
+    pad_x = sb_x + 12
+    card_w = sb_w - 24
+    cur_y = 12
 
-    banner_rect = pygame.Rect(cx - banner_w // 2, cy - banner_h // 2, banner_w, banner_h)
-    pygame.draw.rect(screen, COLOR_WIN_OUTLINE, banner_rect.inflate(8, 8), border_radius=10)
-    pygame.draw.rect(screen, COLOR_WIN_BANNER, banner_rect, border_radius=8)
+    # --- 卡片 1: 🏆 记分牌 (Scoreboard) ---
+    c1_rect = pygame.Rect(pad_x, cur_y, card_w, 88)
+    pygame.draw.rect(screen, (24, 34, 52), c1_rect, border_radius=8)
+    pygame.draw.rect(screen, (48, 68, 98), c1_rect, width=1, border_radius=8)
 
-    cur_y = banner_rect.top + 10
-    for s in rendered_surfs:
-        sx = cx - s.get_width() // 2
-        screen.blit(s, (sx, cur_y))
-        cur_y += s.get_height() + 6
+    t_title = big_font.render("🏆 记分牌", True, (255, 220, 80))
+    screen.blit(t_title, (pad_x + 12, cur_y + 8))
+
+    t_total = font.render(f"累计总分: {total_score:,} 分", True, (255, 240, 150))
+    screen.blit(t_total, (pad_x + 12, cur_y + 38))
+
+    if last_round_score > 0:
+        d_str = " (破纪录翻倍!)" if score_doubled else ""
+        t_last = font.render(f"本局得分: +{last_round_score:,}分{d_str}", True, (120, 240, 160))
+    elif caught_by_wolf:
+        t_last = font.render("本局得分: 0 分 (被狼抓)", True, (255, 120, 120))
+    else:
+        t_last = font.render("本局得分: --", True, (180, 190, 205))
+    screen.blit(t_last, (pad_x + 12, cur_y + 60))
+
+    cur_y += 98
+
+    # --- 卡片 2: 📊 关卡分值 (Level Points Info) ---
+    c2_rect = pygame.Rect(pad_x, cur_y, card_w, 72)
+    pygame.draw.rect(screen, (24, 34, 52), c2_rect, border_radius=8)
+    pygame.draw.rect(screen, (48, 68, 98), c2_rect, width=1, border_radius=8)
+
+    base_pts = difficulty_level * 100
+    rec_pts = base_pts * 2
+    t_lvl = font.render(f"当前关卡: {difficulty_level} 阶", True, (220, 230, 245))
+    t_pts = font.render(f"通关: +{base_pts} 分 | 破纪录: +{rec_pts} 分", True, (160, 210, 255))
+
+    screen.blit(t_lvl, (pad_x + 12, cur_y + 10))
+    screen.blit(t_pts, (pad_x + 12, cur_y + 38))
+
+    cur_y += 82
+
+    # --- 卡片 3: ⏱️ 计时 & 纪录 (Timer & Record) ---
+    c3_rect = pygame.Rect(pad_x, cur_y, card_w, 72)
+    pygame.draw.rect(screen, (24, 34, 52), c3_rect, border_radius=8)
+    pygame.draw.rect(screen, (48, 68, 98), c3_rect, width=1, border_radius=8)
+
+    time_str = f"{current_time_sec:.2f} 秒" if timer_started else "按方向键开始"
+    best_sec = best_records.get(difficulty_level)
+    best_str = f"{best_sec:.2f} 秒" if best_sec is not None else "无纪录"
+
+    t_time = font.render(f"当前用时: {time_str}", True, (255, 230, 140) if timer_started else (170, 180, 195))
+    t_best = font.render(f"最佳纪录: {best_str}", True, (180, 220, 255))
+
+    screen.blit(t_time, (pad_x + 12, cur_y + 10))
+    screen.blit(t_best, (pad_x + 12, cur_y + 38))
+
+    cur_y += 82
+
+    # --- 卡片 4: 💬 游戏状态与过关/被抓提示 (Status Banner - 侧边显示，完全不遮挡地图) ---
+    c4_h = 135
+    c4_rect = pygame.Rect(pad_x, cur_y, card_w, c4_h)
+
+    if won:
+        pygame.draw.rect(screen, (38, 78, 52), c4_rect, border_radius=8)
+        pygame.draw.rect(screen, (80, 180, 100), c4_rect, width=2, border_radius=8)
+
+        st1 = big_font.render("🎉 成功通关！", True, (255, 255, 100))
+        st2 = font.render(f"获得积分: +{last_round_score} 分", True, (220, 255, 220))
+        if score_doubled:
+            st3 = font.render("🏆 破纪录积分翻倍！", True, (255, 220, 100))
+        else:
+            st3 = font.render("再接再厉，挑战更快速度！", True, (200, 230, 210))
+        st4 = font.render("👉 按 R 键继续下一局", True, (255, 240, 180))
+
+        screen.blit(st1, (pad_x + 12, cur_y + 8))
+        screen.blit(st2, (pad_x + 12, cur_y + 40))
+        screen.blit(st3, (pad_x + 12, cur_y + 64))
+        screen.blit(st4, (pad_x + 12, cur_y + 94))
+
+    elif caught_by_wolf:
+        pygame.draw.rect(screen, (110, 28, 36), c4_rect, border_radius=8)
+        pygame.draw.rect(screen, (200, 60, 70), c4_rect, width=2, border_radius=8)
+
+        st1 = big_font.render("😱 被狼抓住了！", True, (255, 220, 220))
+        st2 = font.render("本局得分: 0 分", True, (255, 180, 180))
+        st3 = font.render("被大灰狼追上了...", True, (230, 190, 190))
+        st4 = font.render("👉 按 R 键重新开始", True, (255, 240, 180))
+
+        screen.blit(st1, (pad_x + 12, cur_y + 8))
+        screen.blit(st2, (pad_x + 12, cur_y + 40))
+        screen.blit(st3, (pad_x + 12, cur_y + 64))
+        screen.blit(st4, (pad_x + 12, cur_y + 94))
+
+    else:
+        pygame.draw.rect(screen, (24, 34, 52), c4_rect, border_radius=8)
+        pygame.draw.rect(screen, (48, 68, 98), c4_rect, width=1, border_radius=8)
+
+        st1 = font.render("🟢 正在闯关中...", True, (120, 230, 160))
+        st2 = font.render("按 WASD / 方向键移动", True, (190, 200, 215))
+        st3 = font.render("避开大灰狼，到达小屋", True, (190, 200, 215))
+        st4 = font.render("挑战用时最快纪录！", True, (170, 180, 200))
+
+        screen.blit(st1, (pad_x + 12, cur_y + 12))
+        screen.blit(st2, (pad_x + 12, cur_y + 40))
+        screen.blit(st3, (pad_x + 12, cur_y + 66))
+        screen.blit(st4, (pad_x + 12, cur_y + 92))
+
+    cur_y += c4_h + 10
+
+    # --- 卡片 5: 🕹️ 操作快捷键 (Controls) ---
+    c5_h = max(110, sh - cur_y - 12)
+    c5_rect = pygame.Rect(pad_x, cur_y, card_w, c5_h)
+    pygame.draw.rect(screen, (20, 28, 44), c5_rect, border_radius=8)
+    pygame.draw.rect(screen, (38, 52, 78), c5_rect, width=1, border_radius=8)
+
+    t_ctrl_title = font.render("🕹️ 快捷键指南", True, (180, 200, 220))
+    screen.blit(t_ctrl_title, (pad_x + 10, cur_y + 8))
+
+    ctrl_lines = [
+        "WASD / 方向键 : 移动小人",
+        "1-9 / 0 : 选阶  |  +/- : 调难度",
+        "R : 重新生成  |  P : 切换外观",
+        "F : 召唤大灰狼 |  C : 切换视角",
+    ]
+    for i, line in enumerate(ctrl_lines):
+        t_l = font.render(line, True, (140, 155, 175))
+        screen.blit(t_l, (pad_x + 10, cur_y + 32 + i * 22))
 
 
 if __name__ == "__main__":
