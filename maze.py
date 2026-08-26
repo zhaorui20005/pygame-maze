@@ -21,84 +21,40 @@ from dataclasses import dataclass
 WALL = 1
 PATH = 0
 
-# 难度等级 1-10 参数配置
-DIFFICULTIES = {
-    "1": {
-        "cell_cols": 8,
-        "cell_rows": 8,
-        "straight_bias": 0.55,
-        "max_straight_run": 3,
-        "min_dead_end_depth": 2.2,
-    },
-    "2": {
-        "cell_cols": 10,
-        "cell_rows": 10,
-        "straight_bias": 0.60,
-        "max_straight_run": 3,
-        "min_dead_end_depth": 2.8,
-    },
-    "3": {
-        "cell_cols": 12,
-        "cell_rows": 12,
-        "straight_bias": 0.64,
-        "max_straight_run": 4,
-        "min_dead_end_depth": 3.2,
-    },
-    "4": {
-        "cell_cols": 15,
-        "cell_rows": 15,
-        "straight_bias": 0.68,
-        "max_straight_run": 4,
-        "min_dead_end_depth": 3.6,
-    },
-    "5": {
-        "cell_cols": 18,
-        "cell_rows": 18,
-        "straight_bias": 0.72,
-        "max_straight_run": 5,
-        "min_dead_end_depth": 4.0,
-    },
-    "6": {
-        "cell_cols": 21,
-        "cell_rows": 21,
-        "straight_bias": 0.75,
-        "max_straight_run": 5,
-        "min_dead_end_depth": 4.5,
-    },
-    "7": {
-        "cell_cols": 25,
-        "cell_rows": 25,
-        "straight_bias": 0.78,
-        "max_straight_run": 6,
-        "min_dead_end_depth": 5.0,
-    },
-    "8": {
-        "cell_cols": 30,
-        "cell_rows": 30,
-        "straight_bias": 0.81,
-        "max_straight_run": 6,
-        "min_dead_end_depth": 5.5,
-    },
-    "9": {
-        "cell_cols": 35,
-        "cell_rows": 35,
-        "straight_bias": 0.84,
-        "max_straight_run": 7,
-        "min_dead_end_depth": 6.0,
-    },
-    "10": {
-        "cell_cols": 40,
-        "cell_rows": 40,
-        "straight_bias": 0.86,
-        "max_straight_run": 8,
-        "min_dead_end_depth": 6.5,
-    },
+# 第一大关：绿野森林 (DFS 算法) 1-10 阶参数配置
+W1_DIFFICULTIES = {
+    "1": {"cell_cols": 8, "cell_rows": 8, "straight_bias": 0.55, "max_straight_run": 3, "min_dead_end_depth": 2.2},
+    "2": {"cell_cols": 10, "cell_rows": 10, "straight_bias": 0.60, "max_straight_run": 3, "min_dead_end_depth": 2.8},
+    "3": {"cell_cols": 12, "cell_rows": 12, "straight_bias": 0.64, "max_straight_run": 4, "min_dead_end_depth": 3.2},
+    "4": {"cell_cols": 15, "cell_rows": 15, "straight_bias": 0.68, "max_straight_run": 4, "min_dead_end_depth": 3.6},
+    "5": {"cell_cols": 18, "cell_rows": 18, "straight_bias": 0.72, "max_straight_run": 5, "min_dead_end_depth": 4.0},
+    "6": {"cell_cols": 21, "cell_rows": 21, "straight_bias": 0.75, "max_straight_run": 5, "min_dead_end_depth": 4.5},
+    "7": {"cell_cols": 25, "cell_rows": 25, "straight_bias": 0.78, "max_straight_run": 6, "min_dead_end_depth": 5.0},
+    "8": {"cell_cols": 30, "cell_rows": 30, "straight_bias": 0.81, "max_straight_run": 6, "min_dead_end_depth": 5.5},
+    "9": {"cell_cols": 35, "cell_rows": 35, "straight_bias": 0.84, "max_straight_run": 7, "min_dead_end_depth": 6.0},
+    "10": {"cell_cols": 40, "cell_rows": 40, "straight_bias": 0.86, "max_straight_run": 8, "min_dead_end_depth": 6.5},
 }
 
+# 第二大关：狼穴地牢 (Prim + 伪环路高难算法) 1-10 阶参数配置
+W2_DIFFICULTIES = {
+    "1": {"cell_cols": 10, "cell_rows": 10, "loop_ratio": 0.03},
+    "2": {"cell_cols": 12, "cell_rows": 12, "loop_ratio": 0.03},
+    "3": {"cell_cols": 15, "cell_rows": 15, "loop_ratio": 0.04},
+    "4": {"cell_cols": 18, "cell_rows": 18, "loop_ratio": 0.04},
+    "5": {"cell_cols": 21, "cell_rows": 21, "loop_ratio": 0.04},
+    "6": {"cell_cols": 25, "cell_rows": 25, "loop_ratio": 0.05},
+    "7": {"cell_cols": 28, "cell_rows": 28, "loop_ratio": 0.05},
+    "8": {"cell_cols": 32, "cell_rows": 32, "loop_ratio": 0.05},
+    "9": {"cell_cols": 36, "cell_rows": 36, "loop_ratio": 0.06},
+    "10": {"cell_cols": 40, "cell_rows": 40, "loop_ratio": 0.06},
+}
+
+DIFFICULTIES = W1_DIFFICULTIES
+
 _DIFFICULTY_ALIASES = {
-    "easy": "3",
-    "normal": "5",
-    "hard": "8",
+    "easy": "1_3",
+    "normal": "1_5",
+    "hard": "2_5",
 }
 
 # 房间坐标上的四连通：右、左、下、上。
@@ -142,29 +98,65 @@ class Maze:
             return True
         return self.grid[tile_y][tile_x] == WALL
 
+    def solve_path(self) -> list[tuple[int, int]]:
+        """求解从入口到出口的路径。"""
+        return solve_path(self.grid, self.entrance, self.exit)
 
-def generate_maze(difficulty_key: str | int = "5", seed: int | None = None) -> Maze:
-    """按难度等级 (1-10) 生成一局完美迷宫；可选 seed 便于复现。"""
-    key_str = str(difficulty_key).lower()
-    if key_str in _DIFFICULTY_ALIASES:
-        key_str = _DIFFICULTY_ALIASES[key_str]
+    def solve_path_with_visited(
+        self,
+    ) -> tuple[list[tuple[int, int]], list[tuple[int, int]], dict[tuple[int, int], tuple[int, int] | None]]:
+        """求解从入口到出口的路径，同时返回 DFS 探索节点顺序与父节点映射关系。"""
+        return solve_path_with_visited(self.grid, self.entrance, self.exit)
 
-    if key_str not in DIFFICULTIES:
-        raise ValueError(f"Unknown difficulty: {difficulty_key}")
 
-    spec = DIFFICULTIES[key_str]
+def generate_maze(
+    difficulty_key: str | int = "1_5", seed: int | None = None, world: int | None = None, level: int | None = None
+) -> Maze:
+    """按大关 (world 1/2) 和关卡阶数 (level 1-10) 生成一局迷宫；可选 seed 便于复现。
+    World 1 (第一大关：绿野森林)：1-10 阶采用拉长路口 DFS 算法，直观清晰；
+    World 2 (第二大关：狼穴地牢)：1-10 阶采用高密转弯 Prim + 伪环路高难算法，烧脑陡升。
+    """
+    if world is not None and level is not None:
+        w_val = int(world)
+        l_val = int(level)
+    else:
+        key_str = str(difficulty_key).lower()
+        if key_str in _DIFFICULTY_ALIASES:
+            key_str = _DIFFICULTY_ALIASES[key_str]
+        if "_" in key_str:
+            parts = key_str.split("_")
+            w_val = int(parts[0])
+            l_val = int(parts[1])
+        else:
+            val = int(key_str)
+            if val > 10:
+                w_val = 2
+                l_val = val - 10
+            else:
+                w_val = 1
+                l_val = val
+
+    w_val = max(1, min(2, w_val))
+    l_val = max(1, min(10, l_val))
+
+    if w_val == 2:
+        spec = W2_DIFFICULTIES[str(l_val)]
+    else:
+        spec = W1_DIFFICULTIES[str(l_val)]
+
     rng = random.Random(seed)
-
     best: Maze | None = None
     attempts = 1 if seed is not None else _MAX_GENERATE_ATTEMPTS
+    display_key = f"{w_val}_{l_val}"
 
-    # 固定 seed 时只生成一次（测试/复现需要确定性）。
-    # 否则多抽几局，挑死胡同更深、决策点更多的。
     for _ in range(attempts):
-        maze = _carve_maze(spec, key_str, rng)
+        if w_val == 2:
+            maze = _carve_dungeon_maze(spec, display_key, rng)
+        else:
+            maze = _carve_maze(spec, display_key, rng)
         if best is None or _maze_quality(maze) > _maze_quality(best):
             best = maze
-        if maze.metrics.avg_dead_end_depth >= spec["min_dead_end_depth"]:
+        if w_val == 2 or maze.metrics.avg_dead_end_depth >= spec.get("min_dead_end_depth", 0):
             return maze
 
     assert best is not None
@@ -242,6 +234,81 @@ def _carve_maze(spec: dict, difficulty_key: str, rng: random.Random) -> Maze:
 
     entrance = cell_to_tile(start_cx, start_cy)
     # 出口取距离入口最远的房间，保证解尽可能长。
+    exit_tile = _farthest_cell(grid, entrance, cell_cols, cell_rows)
+    metrics = _measure(grid, entrance, exit_tile, difficulty_key)
+    return Maze(
+        grid=grid,
+        entrance=entrance,
+        exit=exit_tile,
+        difficulty_key=difficulty_key,
+        metrics=metrics,
+    )
+
+
+def _carve_dungeon_maze(spec: dict, difficulty_key: str, rng: random.Random) -> Maze:
+    """第二大关：暗黑狼穴地牢高难迷宫算法。
+    特点：
+    1. 普里姆 (Prim) 算法高密转弯，产生九曲十八弯极密通路；
+    2. 引入 4% 伪环路打通 (Braid Loops)，打乱单一路线逻辑，极具迷茫感与挑战性。
+    """
+    cell_cols = spec["cell_cols"]
+    cell_rows = spec["cell_rows"]
+
+    width = cell_cols * 2 + 1
+    height = cell_rows * 2 + 1
+    grid = [[WALL for _ in range(width)] for _ in range(height)]
+
+    def cell_to_tile(cx: int, cy: int) -> tuple[int, int]:
+        return cx * 2 + 1, cy * 2 + 1
+
+    start_cx, start_cy = 0, 0
+    sx, sy = cell_to_tile(start_cx, start_cy)
+    grid[sy][sx] = PATH
+
+    visited = {(start_cx, start_cy)}
+    frontier = []
+    for dcx, dcy in NEIGHBOR_STEPS:
+        ncx, ncy = start_cx + dcx, start_cy + dcy
+        if 0 <= ncx < cell_cols and 0 <= ncy < cell_rows:
+            frontier.append((start_cx, start_cy, dcx, dcy))
+
+    while frontier:
+        idx = rng.randrange(len(frontier))
+        cx, cy, dcx, dcy = frontier.pop(idx)
+        ncx, ncy = cx + dcx, cy + dcy
+
+        if (ncx, ncy) in visited:
+            continue
+
+        visited.add((ncx, ncy))
+        wall_x = cx * 2 + 1 + dcx
+        wall_y = cy * 2 + 1 + dcy
+        nx, ny = cell_to_tile(ncx, ncy)
+        grid[wall_y][wall_x] = PATH
+        grid[ny][nx] = PATH
+
+        for ndcx, ndcy in NEIGHBOR_STEPS:
+            nncx, nncy = ncx + ndcx, ncy + ndcy
+            if 0 <= nncx < cell_cols and 0 <= nncy < cell_rows and (nncx, nncy) not in visited:
+                frontier.append((ncx, ncy, ndcx, ndcy))
+
+    # 引入伪环路 (Braid Loops)
+    candidate_walls = []
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            if grid[y][x] == WALL:
+                if grid[y][x - 1] == PATH and grid[y][x + 1] == PATH and grid[y - 1][x] == WALL and grid[y + 1][x] == WALL:
+                    candidate_walls.append((x, y))
+                elif grid[y - 1][x] == PATH and grid[y + 1][x] == PATH and grid[y][x - 1] == WALL and grid[y][x + 1] == WALL:
+                    candidate_walls.append((x, y))
+
+    if candidate_walls:
+        loop_ratio = spec.get("loop_ratio", 0.04)
+        loop_count = max(1, int(len(candidate_walls) * loop_ratio))
+        for x, y in rng.sample(candidate_walls, min(loop_count, len(candidate_walls))):
+            grid[y][x] = PATH
+
+    entrance = cell_to_tile(start_cx, start_cy)
     exit_tile = _farthest_cell(grid, entrance, cell_cols, cell_rows)
     metrics = _measure(grid, entrance, exit_tile, difficulty_key)
     return Maze(
@@ -356,13 +423,19 @@ def _measure(
         + decision_cells * 3.0
         + avg_depth * 8.0
     )
+    if "_" in difficulty_key:
+        w, l = difficulty_key.split("_")
+        lbl = f"大关{w}-{l}阶"
+    else:
+        lbl = f"{difficulty_key}阶"
+
     return MazeMetrics(
         path_length=path_length,
         dead_ends=dead_ends,
         decision_cells=decision_cells,
         avg_dead_end_depth=avg_depth,
         score=score,
-        label=f"{difficulty_key} 阶",
+        label=lbl,
     )
 
 
@@ -376,3 +449,50 @@ def assert_perfect_maze(maze: Maze) -> None:
             raise AssertionError(f"Unreachable cell {tile}")
     if maze.exit not in dist:
         raise AssertionError("Exit is unreachable")
+
+
+def solve_path(
+    grid: list[list[int]], start: tuple[int, int], end: tuple[int, int]
+) -> list[tuple[int, int]]:
+    """求解从 start 到 end 的路径瓦片坐标列表 [(x0,y0), (x1,y1), ...]"""
+    _, path, _ = solve_path_with_visited(grid, start, end)
+    return path
+
+
+def solve_path_with_visited(
+    grid: list[list[int]], start: tuple[int, int], end: tuple[int, int]
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]], dict[tuple[int, int], tuple[int, int] | None]]:
+    """DFS 深度优先单线探索：每次只沿着一条通路深入试错，遇到死胡同回溯。
+    返回: (visited_order, final_path, parent_map)
+    """
+    stack = [start]
+    parent: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+    visited_order: list[tuple[int, int]] = []
+    visited_set = {start}
+    found = False
+
+    while stack:
+        curr = stack.pop()
+        visited_order.append(curr)
+
+        if curr == end:
+            found = True
+            break
+
+        # 遍历邻居放入栈中（逆序压栈保证正向弹出）
+        neighbors = _path_neighbors(grid, curr[0], curr[1])
+        for nxt in neighbors:
+            if nxt not in visited_set:
+                visited_set.add(nxt)
+                parent[nxt] = curr
+                stack.append(nxt)
+
+    path = []
+    if found:
+        node: tuple[int, int] | None = end
+        while node is not None:
+            path.append(node)
+            node = parent.get(node)
+        path.reverse()
+
+    return visited_order, path, parent
