@@ -10,9 +10,14 @@ import sys
 RECORDS_FILE = "best_records.json"
 
 
-def _load_best_records() -> tuple[dict[int, float], int]:
+def _load_best_records() -> tuple[dict[int, float], int, float | None, int, float, float, float]:
     records: dict[int, float] = {}
     total_score: int = 0
+    challenge_best_time: float | None = None
+    challenge_best_score: int = 0
+    vol_walk: float = 0.7
+    vol_sfx: float = 0.8
+    vol_bgm: float = 0.6
     if os.path.exists(RECORDS_FILE):
         try:
             with open(RECORDS_FILE, "r", encoding="utf-8") as f:
@@ -20,17 +25,52 @@ def _load_best_records() -> tuple[dict[int, float], int]:
                 for k, v in data.items():
                     if k == "total_score":
                         total_score = int(v)
+                    elif k == "challenge_best_time":
+                        challenge_best_time = float(v)
+                    elif k == "challenge_best_score":
+                        challenge_best_score = int(v)
+                    elif k == "vol_walk":
+                        vol_walk = float(v)
+                    elif k == "vol_sfx":
+                        vol_sfx = float(v)
+                    elif k == "vol_bgm":
+                        vol_bgm = float(v)
                     else:
-                        records[int(k)] = float(v)
+                        try:
+                            records[int(k)] = float(v)
+                        except ValueError:
+                            pass
         except Exception as e:
             print(f"Warning: failed to load best records: {e}")
-    return records, total_score
+    return (
+        records,
+        total_score,
+        challenge_best_time,
+        challenge_best_score,
+        vol_walk,
+        vol_sfx,
+        vol_bgm,
+    )
 
 
-def _save_best_records(records: dict[int, float], total_score: int) -> None:
+def _save_best_records(
+    records: dict[int, float],
+    total_score: int,
+    challenge_best_time: float | None = None,
+    challenge_best_score: int = 0,
+    vol_walk: float = 0.7,
+    vol_sfx: float = 0.8,
+    vol_bgm: float = 0.6,
+) -> None:
     try:
         data = {str(k): v for k, v in records.items()}
         data["total_score"] = total_score
+        if challenge_best_time is not None:
+            data["challenge_best_time"] = challenge_best_time
+        data["challenge_best_score"] = challenge_best_score
+        data["vol_walk"] = round(vol_walk, 2)
+        data["vol_sfx"] = round(vol_sfx, 2)
+        data["vol_bgm"] = round(vol_bgm, 2)
         with open(RECORDS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
     except Exception as e:
@@ -43,6 +83,9 @@ from assets import (
     create_flag_surface,
     create_house_surface,
     create_player_sprites,
+    create_sound_bgm_challenge,
+    create_sound_bgm_free,
+    create_sound_bgm_menu,
     create_sound_caught,
     create_sound_start,
     create_sound_step,
@@ -394,6 +437,11 @@ def main() -> None:
     sound_wolf = create_sound_wolf()
     sound_caught = create_sound_caught()
 
+    sound_bgm_menu = create_sound_bgm_menu()
+    sound_bgm_free = create_sound_bgm_free()
+    sound_bgm_challenge = create_sound_bgm_challenge()
+    current_bgm_key: str | None = None
+
     # 生成图形资产
     tree_surf = create_tree_surface(128)
     house_surf = create_house_surface(128)
@@ -417,8 +465,72 @@ def main() -> None:
     won = False
     caught_by_wolf = False
 
-    # 计时器与纪录管理
-    best_records, total_score = _load_best_records()
+    # 计时器、纪录与音量管理
+    (
+        best_records,
+        total_score,
+        challenge_best_time,
+        challenge_best_score,
+        vol_walk,
+        vol_sfx,
+        vol_bgm,
+    ) = _load_best_records()
+
+    def apply_volumes():
+        if sound_step:
+            sound_step.set_volume(vol_walk)
+        if sound_start:
+            sound_start.set_volume(vol_sfx)
+        if sound_win:
+            sound_win.set_volume(vol_sfx)
+        if sound_wolf:
+            sound_wolf.set_volume(vol_sfx)
+        if sound_caught:
+            sound_caught.set_volume(vol_sfx)
+        if sound_bgm_menu:
+            sound_bgm_menu.set_volume(vol_bgm)
+        if sound_bgm_free:
+            sound_bgm_free.set_volume(vol_bgm)
+        if sound_bgm_challenge:
+            sound_bgm_challenge.set_volume(vol_bgm)
+
+    def switch_bgm(key: str):
+        nonlocal current_bgm_key
+        if current_bgm_key == key:
+            return
+        if sound_bgm_menu:
+            sound_bgm_menu.stop()
+        if sound_bgm_free:
+            sound_bgm_free.stop()
+        if sound_bgm_challenge:
+            sound_bgm_challenge.stop()
+
+        current_bgm_key = key
+        target = None
+        if key == "menu":
+            target = sound_bgm_menu
+        elif key == "free":
+            target = sound_bgm_free
+        elif key == "challenge":
+            target = sound_bgm_challenge
+
+        if target:
+            target.set_volume(vol_bgm)
+            try:
+                target.play(loops=-1)
+            except Exception as e:
+                print(f"Warning: failed to play BGM {key}: {e}")
+
+    apply_volumes()
+    switch_bgm("menu")
+
+    in_menu = True
+    game_mode = "free"  # "free" 或 "challenge"
+    challenge_total_time = 0.0
+    challenge_total_score = 0
+    challenge_completed = False
+    dragging_slider = None
+
     last_round_score = 0
     score_doubled = False
     timer_started = False
@@ -440,12 +552,131 @@ def main() -> None:
         if sound_start:
             sound_start.play()
 
+    def start_free_mode():
+        nonlocal in_menu, game_mode, difficulty_level
+        in_menu = False
+        game_mode = "free"
+        difficulty_level = 5
+        switch_bgm("free")
+        reset_level_state()
+
+    def start_challenge_mode():
+        nonlocal in_menu, game_mode, difficulty_level, challenge_total_time, challenge_total_score, challenge_completed
+        in_menu = False
+        game_mode = "challenge"
+        difficulty_level = 1
+        challenge_total_time = 0.0
+        challenge_total_score = 0
+        challenge_completed = False
+        switch_bgm("challenge")
+        reset_level_state()
+
     # 开局播放声音
     if sound_start:
         sound_start.play()
 
     running = True
     while running:
+        mouse_pos = pygame.mouse.get_pos()
+
+        if in_menu:
+            switch_bgm("menu")
+            btn_free_rect, btn_challenge_rect, sound_rects = _draw_main_menu(
+                screen,
+                font,
+                big_font,
+                mouse_pos,
+                total_score,
+                challenge_best_time,
+                challenge_best_score,
+                vol_walk,
+                vol_sfx,
+                vol_bgm,
+            )
+            pygame.display.flip()
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.VIDEORESIZE:
+                    screen = pygame.display.set_mode(event.size, pygame.RESIZABLE)
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key in (pygame.K_1, pygame.K_KP1):
+                        start_free_mode()
+                    elif event.key in (pygame.K_2, pygame.K_KP2):
+                        start_challenge_mode()
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if btn_free_rect.collidepoint(event.pos):
+                        start_free_mode()
+                    elif btn_challenge_rect.collidepoint(event.pos):
+                        start_challenge_mode()
+                    elif sound_rects["walk_minus"].collidepoint(event.pos):
+                        vol_walk = max(0.0, round((vol_walk - 0.05) * 20.0) / 20.0)
+                        apply_volumes()
+                        if sound_step:
+                            sound_step.play()
+                        _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+                    elif sound_rects["walk_plus"].collidepoint(event.pos):
+                        vol_walk = min(1.0, round((vol_walk + 0.05) * 20.0) / 20.0)
+                        apply_volumes()
+                        if sound_step:
+                            sound_step.play()
+                        _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+                    elif sound_rects["walk_track"].collidepoint(event.pos):
+                        dragging_slider = "walk"
+                        vol_walk = max(0.0, min(1.0, round(((event.pos[0] - sound_rects["walk_track"].x) / sound_rects["walk_track"].w) * 20.0) / 20.0))
+                        apply_volumes()
+                        if sound_step:
+                            sound_step.play()
+                        _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+                    elif sound_rects["sfx_minus"].collidepoint(event.pos):
+                        vol_sfx = max(0.0, round((vol_sfx - 0.05) * 20.0) / 20.0)
+                        apply_volumes()
+                        if sound_start:
+                            sound_start.play()
+                        _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+                    elif sound_rects["sfx_plus"].collidepoint(event.pos):
+                        vol_sfx = min(1.0, round((vol_sfx + 0.05) * 20.0) / 20.0)
+                        apply_volumes()
+                        if sound_start:
+                            sound_start.play()
+                        _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+                    elif sound_rects["sfx_track"].collidepoint(event.pos):
+                        dragging_slider = "sfx"
+                        vol_sfx = max(0.0, min(1.0, round(((event.pos[0] - sound_rects["sfx_track"].x) / sound_rects["sfx_track"].w) * 20.0) / 20.0))
+                        apply_volumes()
+                        if sound_start:
+                            sound_start.play()
+                        _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+                    elif sound_rects["bgm_minus"].collidepoint(event.pos):
+                        vol_bgm = max(0.0, round((vol_bgm - 0.05) * 20.0) / 20.0)
+                        apply_volumes()
+                        _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+                    elif sound_rects["bgm_plus"].collidepoint(event.pos):
+                        vol_bgm = min(1.0, round((vol_bgm + 0.05) * 20.0) / 20.0)
+                        apply_volumes()
+                        _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+                    elif sound_rects["bgm_track"].collidepoint(event.pos):
+                        dragging_slider = "bgm"
+                        vol_bgm = max(0.0, min(1.0, round(((event.pos[0] - sound_rects["bgm_track"].x) / sound_rects["bgm_track"].w) * 20.0) / 20.0))
+                        apply_volumes()
+                        _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    dragging_slider = None
+                elif event.type == pygame.MOUSEMOTION and dragging_slider:
+                    if dragging_slider == "walk":
+                        vol_walk = max(0.0, min(1.0, round(((event.pos[0] - sound_rects["walk_track"].x) / sound_rects["walk_track"].w) * 20.0) / 20.0))
+                    elif dragging_slider == "sfx":
+                        vol_sfx = max(0.0, min(1.0, round(((event.pos[0] - sound_rects["sfx_track"].x) / sound_rects["sfx_track"].w) * 20.0) / 20.0))
+                    elif dragging_slider == "bgm":
+                        vol_bgm = max(0.0, min(1.0, round(((event.pos[0] - sound_rects["bgm_track"].x) / sound_rects["bgm_track"].w) * 20.0) / 20.0))
+                    apply_volumes()
+                    _save_best_records(best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm)
+            clock.tick(FPS)
+            continue
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -454,8 +685,9 @@ def main() -> None:
                 if not camera.following_player:
                     camera.fit_maze(maze, screen)
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
+                if event.key in (pygame.K_ESCAPE, pygame.K_m):
+                    in_menu = True
+                    switch_bgm("menu")
                 elif event.key == pygame.K_f:
                     if wolf.active:
                         wolf.active = False
@@ -467,24 +699,42 @@ def main() -> None:
                     current_skin_idx = (current_skin_idx + 1) % len(skin_list)
                     player_sprites = player_skins[skin_list[current_skin_idx]]
                 elif event.key in (pygame.K_c, pygame.K_SPACE):
-                    camera.toggle_view(maze, player, screen)
-                elif event.key in NUM_KEY_TO_LEVEL:
+                    if won and game_mode == "challenge":
+                        if difficulty_level < 10:
+                            difficulty_level += 1
+                            reset_level_state()
+                        elif challenge_completed:
+                            start_challenge_mode()
+                    else:
+                        camera.toggle_view(maze, player, screen)
+                elif event.key in NUM_KEY_TO_LEVEL and game_mode == "free":
                     difficulty_level = NUM_KEY_TO_LEVEL[event.key]
                     reset_level_state()
-                elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS):
+                elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS) and game_mode == "free":
                     if difficulty_level < 10:
                         difficulty_level += 1
                         reset_level_state()
-                elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS) and game_mode == "free":
                     if difficulty_level > 1:
                         difficulty_level -= 1
                         reset_level_state()
                 elif _is_reroll_event(event):
-                    reset_level_state()
+                    if game_mode == "challenge" and won:
+                        if difficulty_level < 10:
+                            difficulty_level += 1
+                            reset_level_state()
+                        elif challenge_completed:
+                            start_challenge_mode()
+                    else:
+                        reset_level_state()
             elif event.type != pygame.KEYDOWN and _is_reroll_event(event):
                 reset_level_state()
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.pos[0] < screen.get_width() - SIDEBAR_WIDTH and event.pos[1] > HUD_HEIGHT:
+                if event.pos[0] >= screen.get_width() - SIDEBAR_WIDTH:
+                    # 检查是否点击侧边栏顶部的 "返回主菜单" 按钮区
+                    if event.pos[1] >= screen.get_height() - 40:
+                        in_menu = True
+                elif event.pos[1] > HUD_HEIGHT:
                     if event.button in (1, 2, 3):
                         camera.start_drag(event.pos)
                     elif event.button == 4:
@@ -557,8 +807,31 @@ def main() -> None:
                     last_round_score = base_score
                     score_doubled = False
 
-                total_score += last_round_score
-                _save_best_records(best_records, total_score)
+                if game_mode == "free":
+                    total_score += last_round_score
+                    _save_best_records(
+                        best_records, total_score, challenge_best_time, challenge_best_score
+                    )
+                elif game_mode == "challenge":
+                    challenge_total_time += current_time_sec
+                    challenge_total_score += last_round_score
+                    if difficulty_level == 10:
+                        challenge_completed = True
+                        total_score += challenge_total_score
+                        if (
+                            challenge_best_time is None
+                            or challenge_total_time < challenge_best_time
+                        ):
+                            challenge_best_time = challenge_total_time
+                        if challenge_total_score > challenge_best_score:
+                            challenge_best_score = challenge_total_score
+                        _save_best_records(
+                            best_records, total_score, challenge_best_time, challenge_best_score
+                        )
+                    else:
+                        _save_best_records(
+                            best_records, total_score, challenge_best_time, challenge_best_score
+                        )
 
                 if sound_win:
                     sound_win.play()
@@ -600,12 +873,170 @@ def main() -> None:
             total_score,
             last_round_score,
             score_doubled,
+            game_mode,
+            challenge_total_time,
+            challenge_total_score,
+            challenge_completed,
         )
         pygame.display.flip()
         clock.tick(FPS)
 
     pygame.quit()
     sys.exit(0)
+
+
+def _draw_main_menu(
+    screen: pygame.Surface,
+    font: pygame.font.Font,
+    big_font: pygame.font.Font,
+    mouse_pos: tuple[int, int],
+    total_score: int,
+    challenge_best_time: float | None,
+    challenge_best_score: int,
+    vol_walk: float,
+    vol_sfx: float,
+    vol_bgm: float,
+) -> tuple[pygame.Rect, pygame.Rect, dict[str, pygame.Rect]]:
+    """绘制美观的主界面模式选择菜单与音量控制，返回模式按钮与音量按钮的 Rect。"""
+    screen.fill((12, 16, 26))
+    sw, sh = screen.get_size()
+    cx, cy = sw // 2, sh // 2
+
+    # 1. 主标题与副标题
+    title_surf = big_font.render("🎮 小红帽迷宫大冒险", True, (255, 225, 90))
+    title_rect = title_surf.get_rect(center=(cx, cy - 240))
+    screen.blit(title_surf, title_rect)
+
+    sub_surf = font.render("—— 请选择游戏模式 & 调整声音设置 ——", True, (170, 190, 215))
+    sub_rect = sub_surf.get_rect(center=(cx, cy - 202))
+    screen.blit(sub_surf, sub_rect)
+
+    card_w = 520
+
+    # 2. 模式 1 按钮：自由模式 (Free Mode)
+    btn1_h = 68
+    btn1_rect = pygame.Rect(cx - card_w // 2, cy - 176, card_w, btn1_h)
+    hover1 = btn1_rect.collidepoint(mouse_pos)
+
+    bg_color1 = (32, 48, 74) if hover1 else (22, 32, 52)
+    border_color1 = (100, 180, 255) if hover1 else (48, 72, 108)
+    pygame.draw.rect(screen, bg_color1, btn1_rect, border_radius=10)
+    pygame.draw.rect(screen, border_color1, btn1_rect, width=2 if hover1 else 1, border_radius=10)
+
+    t1 = font.render("🌟 1. 自由模式 (Free Mode)", True, (255, 240, 150) if hover1 else (230, 235, 245))
+    screen.blit(t1, (btn1_rect.x + 18, btn1_rect.y + 10))
+
+    desc1 = font.render("按 [1] 键或点击 | 1~10 阶自由切换，无限切关与随心练习", True, (160, 180, 205))
+    screen.blit(desc1, (btn1_rect.x + 18, btn1_rect.y + 38))
+
+    # 3. 模式 2 按钮：闯关模式 (Challenge Mode)
+    btn2_h = 68
+    btn2_rect = pygame.Rect(cx - card_w // 2, cy - 96, card_w, btn2_h)
+    hover2 = btn2_rect.collidepoint(mouse_pos)
+
+    bg_color2 = (32, 48, 74) if hover2 else (22, 32, 52)
+    border_color2 = (255, 210, 90) if hover2 else (48, 72, 108)
+    pygame.draw.rect(screen, bg_color2, btn2_rect, border_radius=10)
+    pygame.draw.rect(screen, border_color2, btn2_rect, width=2 if hover2 else 1, border_radius=10)
+
+    t2 = font.render("🏆 2. 闯关模式 (Challenge Mode)", True, (255, 220, 90) if hover2 else (230, 235, 245))
+    screen.blit(t2, (btn2_rect.x + 18, btn2_rect.y + 10))
+
+    desc2 = font.render("按 [2] 键或点击 | 从 1 阶连续闯关至 10 阶，结算总用时与得分", True, (160, 180, 205))
+    screen.blit(desc2, (btn2_rect.x + 18, btn2_rect.y + 38))
+
+    # 4. 卡片 3：🎵 声音大小设置 (Sound Volume Settings)
+    c3_h = 120
+    c3_rect = pygame.Rect(cx - card_w // 2, cy - 16, card_w, c3_h)
+    pygame.draw.rect(screen, (22, 32, 50), c3_rect, border_radius=10)
+    pygame.draw.rect(screen, (60, 90, 140), c3_rect, width=1, border_radius=10)
+
+    v_title = font.render("🎵 声音大小设置", True, (255, 220, 90))
+    screen.blit(v_title, (c3_rect.x + 16, c3_rect.y + 8))
+
+    def _draw_vol_row(
+        label_text: str, y_pos: int, vol_val: float
+    ) -> tuple[pygame.Rect, pygame.Rect, pygame.Rect]:
+        lbl = font.render(label_text, True, (220, 230, 245))
+        screen.blit(lbl, (c3_rect.x + 16, y_pos))
+
+        b_minus = pygame.Rect(c3_rect.x + 120, y_pos - 2, 28, 22)
+        h_m = b_minus.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (48, 68, 98) if h_m else (32, 46, 68), b_minus, border_radius=4)
+        pygame.draw.rect(screen, (100, 140, 190), b_minus, width=1, border_radius=4)
+        t_m = font.render("-", True, (255, 255, 255))
+        screen.blit(t_m, t_m.get_rect(center=b_minus.center))
+
+        track = pygame.Rect(c3_rect.x + 158, y_pos + 5, 180, 8)
+        pygame.draw.rect(screen, (40, 52, 74), track, border_radius=4)
+        fill_w = int(vol_val * track.w)
+        if fill_w > 0:
+            pygame.draw.rect(
+                screen,
+                (100, 190, 255),
+                (track.x, track.y, fill_w, track.h),
+                border_radius=4,
+            )
+        knob_x = track.x + fill_w
+        pygame.draw.circle(screen, (255, 235, 140), (knob_x, track.centery), 7)
+
+        b_plus = pygame.Rect(c3_rect.x + 348, y_pos - 2, 28, 22)
+        h_p = b_plus.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (48, 68, 98) if h_p else (32, 46, 68), b_plus, border_radius=4)
+        pygame.draw.rect(screen, (100, 140, 190), b_plus, width=1, border_radius=4)
+        t_p = font.render("+", True, (255, 255, 255))
+        screen.blit(t_p, t_p.get_rect(center=b_plus.center))
+
+        val_txt = font.render(f"{int(round(vol_val * 100))}%", True, (255, 235, 150))
+        screen.blit(val_txt, (c3_rect.x + 388, y_pos))
+
+        return b_minus, b_plus, track
+
+    bm_w, bp_w, tr_w = _draw_vol_row("🚶 走路音效", c3_rect.y + 34, vol_walk)
+    bm_s, bp_s, tr_s = _draw_vol_row("🔔 提示音效", c3_rect.y + 61, vol_sfx)
+    bm_b, bp_b, tr_b = _draw_vol_row("🎵 背景音乐", c3_rect.y + 88, vol_bgm)
+
+    sound_rects = {
+        "walk_minus": bm_w,
+        "walk_plus": bp_w,
+        "walk_track": tr_w,
+        "sfx_minus": bm_s,
+        "sfx_plus": bp_s,
+        "sfx_track": tr_s,
+        "bgm_minus": bm_b,
+        "bgm_plus": bp_b,
+        "bgm_track": tr_b,
+    }
+
+    # 5. 卡片 4：底部荣耀纪录卡片 (Statistics Card)
+    card4_h = 75
+    card4_rect = pygame.Rect(cx - card_w // 2, cy + 116, card_w, card4_h)
+    pygame.draw.rect(screen, (18, 26, 40), card4_rect, border_radius=10)
+    pygame.draw.rect(screen, (40, 58, 88), card4_rect, width=1, border_radius=10)
+
+    r_title = font.render("📊 荣耀排行榜纪录", True, (255, 215, 80))
+    screen.blit(r_title, (card4_rect.x + 16, card4_rect.y + 10))
+
+    t_score = font.render(f"累计总得分: {total_score:,} 分", True, (200, 225, 245))
+    screen.blit(t_score, (card4_rect.x + 16, card4_rect.y + 32))
+
+    c_best_t_str = f"{challenge_best_time:.2f} 秒" if challenge_best_time is not None else "暂无纪录"
+    c_best_s_str = f"{challenge_best_score:,} 分" if challenge_best_score > 0 else "暂无纪录"
+    t_chal = font.render(
+        f"闯关模式最佳全通: {c_best_t_str} | 最高得分: {c_best_s_str}", True, (180, 210, 255)
+    )
+    screen.blit(t_chal, (card4_rect.x + 16, card4_rect.y + 52))
+
+    # 6. 脚标提示
+    hint_surf = font.render(
+        "👉 点击模式或调音按钮 | 按 [1]/[2] 启动模式 | 按 [ESC] 退出程序",
+        True,
+        (130, 150, 175),
+    )
+    hint_rect = hint_surf.get_rect(center=(cx, sh - 22))
+    screen.blit(hint_surf, hint_rect)
+
+    return btn1_rect, btn2_rect, sound_rects
 
 
 def _draw(
@@ -629,6 +1060,10 @@ def _draw(
     total_score: int,
     last_round_score: int,
     score_doubled: bool,
+    game_mode: str,
+    challenge_total_time: float,
+    challenge_total_score: int,
+    challenge_completed: bool,
 ) -> None:
     screen.fill(COLOR_BG)
     screen_w, screen_h = screen.get_size()
@@ -756,6 +1191,10 @@ def _draw(
         total_score,
         last_round_score,
         score_doubled,
+        game_mode,
+        challenge_total_time,
+        challenge_total_score,
+        challenge_completed,
     )
 
 
@@ -772,6 +1211,10 @@ def _draw_sidebar(
     total_score: int,
     last_round_score: int,
     score_doubled: bool,
+    game_mode: str,
+    challenge_total_time: float,
+    challenge_total_score: int,
+    challenge_completed: bool,
 ) -> None:
     """右侧独立记分牌面板：包含总得分、关卡分值、计时纪录、通关/被抓提示卡片与快捷键指南。"""
     sw, sh = screen.get_size()
@@ -792,19 +1235,23 @@ def _draw_sidebar(
     pygame.draw.rect(screen, (24, 34, 52), c1_rect, border_radius=8)
     pygame.draw.rect(screen, (48, 68, 98), c1_rect, width=1, border_radius=8)
 
-    t_title = big_font.render("🏆 记分牌", True, (255, 220, 80))
+    t_mode_str = "🌟 自由模式" if game_mode == "free" else "🏆 闯关模式 (1~10阶)"
+    t_title = font.render(f"模式: {t_mode_str}", True, (255, 220, 80))
     screen.blit(t_title, (pad_x + 12, cur_y + 8))
 
-    t_total = font.render(f"累计总分: {total_score:,} 分", True, (255, 240, 150))
-    screen.blit(t_total, (pad_x + 12, cur_y + 38))
+    t_total = font.render(f"累计总得分: {total_score:,} 分", True, (255, 240, 150))
+    screen.blit(t_total, (pad_x + 12, cur_y + 36))
 
-    if last_round_score > 0:
-        d_str = " (破纪录翻倍!)" if score_doubled else ""
-        t_last = font.render(f"本局得分: +{last_round_score:,}分{d_str}", True, (120, 240, 160))
-    elif caught_by_wolf:
-        t_last = font.render("本局得分: 0 分 (被狼抓)", True, (255, 120, 120))
+    if game_mode == "free":
+        if last_round_score > 0:
+            d_str = " (破纪录翻倍!)" if score_doubled else ""
+            t_last = font.render(f"本局得分: +{last_round_score:,}分{d_str}", True, (120, 240, 160))
+        elif caught_by_wolf:
+            t_last = font.render("本局得分: 0 分 (被狼抓)", True, (255, 120, 120))
+        else:
+            t_last = font.render("本局得分: --", True, (180, 190, 205))
     else:
-        t_last = font.render("本局得分: --", True, (180, 190, 205))
+        t_last = font.render(f"闯关累计得分: {challenge_total_score:,} 分", True, (120, 240, 160))
     screen.blit(t_last, (pad_x + 12, cur_y + 60))
 
     cur_y += 98
@@ -816,8 +1263,12 @@ def _draw_sidebar(
 
     base_pts = difficulty_level * 100
     rec_pts = base_pts * 2
-    t_lvl = font.render(f"当前关卡: {difficulty_level} 阶", True, (220, 230, 245))
-    t_pts = font.render(f"通关: +{base_pts} 分 | 破纪录: +{rec_pts} 分", True, (160, 210, 255))
+    if game_mode == "free":
+        t_lvl = font.render(f"当前关卡: {difficulty_level} 阶", True, (220, 230, 245))
+        t_pts = font.render(f"通关: +{base_pts} 分 | 破纪录: +{rec_pts} 分", True, (160, 210, 255))
+    else:
+        t_lvl = font.render(f"闯关进度: 第 {difficulty_level} / 10 阶", True, (220, 230, 245))
+        t_pts = font.render(f"本阶得分: +{base_pts} 分 (破纪录加倍)", True, (160, 210, 255))
 
     screen.blit(t_lvl, (pad_x + 12, cur_y + 10))
     screen.blit(t_pts, (pad_x + 12, cur_y + 38))
@@ -833,19 +1284,37 @@ def _draw_sidebar(
     best_sec = best_records.get(difficulty_level)
     best_str = f"{best_sec:.2f} 秒" if best_sec is not None else "无纪录"
 
-    t_time = font.render(f"当前用时: {time_str}", True, (255, 230, 140) if timer_started else (170, 180, 195))
-    t_best = font.render(f"最佳纪录: {best_str}", True, (180, 220, 255))
+    if game_mode == "free":
+        t_time = font.render(f"当前用时: {time_str}", True, (255, 230, 140) if timer_started else (170, 180, 195))
+        t_best = font.render(f"本阶最佳纪录: {best_str}", True, (180, 220, 255))
+    else:
+        t_time = font.render(f"本阶用时: {time_str}", True, (255, 230, 140) if timer_started else (170, 180, 195))
+        t_best = font.render(f"闯关累计用时: {challenge_total_time:.2f} 秒", True, (180, 220, 255))
 
     screen.blit(t_time, (pad_x + 12, cur_y + 10))
     screen.blit(t_best, (pad_x + 12, cur_y + 38))
 
     cur_y += 82
 
-    # --- 卡片 4: 💬 游戏状态与过关/被抓提示 (Status Banner - 侧边显示，完全不遮挡地图) ---
+    # --- 卡片 4: 💬 游戏状态与过关/被抓提示 (Status Banner) ---
     c4_h = 135
     c4_rect = pygame.Rect(pad_x, cur_y, card_w, c4_h)
 
-    if won:
+    if game_mode == "challenge" and challenge_completed:
+        pygame.draw.rect(screen, (38, 78, 52), c4_rect, border_radius=8)
+        pygame.draw.rect(screen, (80, 180, 100), c4_rect, width=2, border_radius=8)
+
+        st1 = big_font.render("🏆 大满贯全通关！", True, (255, 255, 100))
+        st2 = font.render(f"1~10阶总用时: {challenge_total_time:.2f} 秒", True, (220, 255, 220))
+        st3 = font.render(f"获得全通总分: +{challenge_total_score:,} 分", True, (255, 220, 100))
+        st4 = font.render("👉 按 R 重测，按 M 返回主菜单", True, (255, 240, 180))
+
+        screen.blit(st1, (pad_x + 12, cur_y + 8))
+        screen.blit(st2, (pad_x + 12, cur_y + 40))
+        screen.blit(st3, (pad_x + 12, cur_y + 64))
+        screen.blit(st4, (pad_x + 12, cur_y + 94))
+
+    elif won:
         pygame.draw.rect(screen, (38, 78, 52), c4_rect, border_radius=8)
         pygame.draw.rect(screen, (80, 180, 100), c4_rect, width=2, border_radius=8)
 
@@ -855,7 +1324,11 @@ def _draw_sidebar(
             st3 = font.render("🏆 破纪录积分翻倍！", True, (255, 220, 100))
         else:
             st3 = font.render("再接再厉，挑战更快速度！", True, (200, 230, 210))
-        st4 = font.render("👉 按 R 键继续下一局", True, (255, 240, 180))
+
+        if game_mode == "free":
+            st4 = font.render("👉 按 R 继续，按 M 返回主菜单", True, (255, 240, 180))
+        else:
+            st4 = font.render(f"👉 按 R / 空格进入第 {difficulty_level + 1} 阶", True, (255, 240, 180))
 
         screen.blit(st1, (pad_x + 12, cur_y + 8))
         screen.blit(st2, (pad_x + 12, cur_y + 40))
@@ -869,7 +1342,7 @@ def _draw_sidebar(
         st1 = big_font.render("😱 被狼抓住了！", True, (255, 220, 220))
         st2 = font.render("本局得分: 0 分", True, (255, 180, 180))
         st3 = font.render("被大灰狼追上了...", True, (230, 190, 190))
-        st4 = font.render("👉 按 R 键重新开始", True, (255, 240, 180))
+        st4 = font.render("👉 按 R 重新尝试本关", True, (255, 240, 180))
 
         screen.blit(st1, (pad_x + 12, cur_y + 8))
         screen.blit(st2, (pad_x + 12, cur_y + 40))
@@ -880,10 +1353,16 @@ def _draw_sidebar(
         pygame.draw.rect(screen, (24, 34, 52), c4_rect, border_radius=8)
         pygame.draw.rect(screen, (48, 68, 98), c4_rect, width=1, border_radius=8)
 
-        st1 = font.render("🟢 正在闯关中...", True, (120, 230, 160))
-        st2 = font.render("按 WASD / 方向键移动", True, (190, 200, 215))
-        st3 = font.render("避开大灰狼，到达小屋", True, (190, 200, 215))
-        st4 = font.render("挑战用时最快纪录！", True, (170, 180, 200))
+        if game_mode == "free":
+            st1 = font.render("🟢 正在自由模式闯关...", True, (120, 230, 160))
+            st2 = font.render("按 WASD / 方向键移动", True, (190, 200, 215))
+            st3 = font.render("避开大灰狼到达小屋", True, (190, 200, 215))
+            st4 = font.render("按 M 键可随时返回主菜单", True, (170, 180, 200))
+        else:
+            st1 = font.render(f"🟢 闯关挑战中 (第{difficulty_level}/10阶)", True, (120, 230, 160))
+            st2 = font.render("按 WASD / 方向键移动", True, (190, 200, 215))
+            st3 = font.render("顺序挑战 1~10 阶全部迷宫", True, (190, 200, 215))
+            st4 = font.render("创造最快全通时间与最高分！", True, (170, 180, 200))
 
         screen.blit(st1, (pad_x + 12, cur_y + 12))
         screen.blit(st2, (pad_x + 12, cur_y + 40))
@@ -902,10 +1381,10 @@ def _draw_sidebar(
     screen.blit(t_ctrl_title, (pad_x + 10, cur_y + 8))
 
     ctrl_lines = [
+        "M / ESC : 返回模式菜单",
         "WASD / 方向键 : 移动小人",
-        "1-9 / 0 : 选阶  |  +/- : 调难度",
-        "R : 重新生成  |  P : 切换外观",
-        "F : 召唤大灰狼 |  C : 切换视角",
+        "R : 重生成/下关  |  P : 换外观",
+        "F : 召唤大灰狼   |  C : 视角",
     ]
     for i, line in enumerate(ctrl_lines):
         t_l = font.render(line, True, (140, 155, 175))

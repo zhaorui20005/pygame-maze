@@ -33,6 +33,16 @@ var audio_start_player: AudioStreamPlayer = null
 var audio_win_player: AudioStreamPlayer = null
 var audio_wolf_player: AudioStreamPlayer = null
 var audio_caught_player: AudioStreamPlayer = null
+var audio_bgm_menu_player: AudioStreamPlayer = null
+var audio_bgm_free_player: AudioStreamPlayer = null
+var audio_bgm_challenge_player: AudioStreamPlayer = null
+var current_bgm_key: String = ""
+
+# 音量设置 (0.0 ~ 1.0)
+var vol_walk: float = 0.7
+var vol_sfx: float = 0.8
+var vol_bgm: float = 0.6
+var dragging_slider: String = ""
 
 var player_tex: Texture2D = null
 var mochi_textures: Dictionary = {}
@@ -53,6 +63,14 @@ var wolf_crying: bool = false
 var wolf_speed: float = 90.0
 
 # 计时器与最佳纪录及积分
+var in_menu: bool = true
+var game_mode: String = "free" # "free" 或 "challenge"
+var challenge_total_time: float = 0.0
+var challenge_total_score: int = 0
+var challenge_completed: bool = false
+var challenge_best_time: float = -1.0
+var challenge_best_score: int = 0
+
 var timer_started: bool = false
 var start_time_msec: int = 0
 var current_time_sec: float = 0.0
@@ -143,11 +161,60 @@ func _ready() -> void:
 	audio_caught_player.stream = SoundGenerator.create_sound_caught()
 	add_child(audio_caught_player)
 
+	audio_bgm_menu_player = AudioStreamPlayer.new()
+	audio_bgm_menu_player.stream = SoundGenerator.create_sound_bgm_menu()
+	add_child(audio_bgm_menu_player)
+
+	audio_bgm_free_player = AudioStreamPlayer.new()
+	audio_bgm_free_player.stream = SoundGenerator.create_sound_bgm_free()
+	add_child(audio_bgm_free_player)
+
+	audio_bgm_challenge_player = AudioStreamPlayer.new()
+	audio_bgm_challenge_player.stream = SoundGenerator.create_sound_bgm_challenge()
+	add_child(audio_bgm_challenge_player)
+
+	_apply_volumes()
+	_switch_bgm("menu")
+
 	player = MazePlayer.new()
 	add_child(player)
 	player.connect("step_taken", Callable(self, "_on_player_step"))
 
 	_start_new_game(difficulty_level)
+	_return_to_main_menu()
+
+func _lin_to_db(v: float) -> float:
+	if v <= 0.001:
+		return -80.0
+	return 20.0 * (log(v) / log(10.0))
+
+func _switch_bgm(key: String) -> void:
+	if current_bgm_key == key:
+		return
+	if audio_bgm_menu_player != null: audio_bgm_menu_player.stop()
+	if audio_bgm_free_player != null: audio_bgm_free_player.stop()
+	if audio_bgm_challenge_player != null: audio_bgm_challenge_player.stop()
+
+	current_bgm_key = key
+	var target_player: AudioStreamPlayer = null
+	if key == "menu": target_player = audio_bgm_menu_player
+	elif key == "free": target_player = audio_bgm_free_player
+	elif key == "challenge": target_player = audio_bgm_challenge_player
+
+	if target_player != null:
+		target_player.volume_db = _lin_to_db(vol_bgm)
+		target_player.play()
+
+func _apply_volumes() -> void:
+	var db_bgm = _lin_to_db(vol_bgm)
+	if audio_step_player != null: audio_step_player.volume_db = _lin_to_db(vol_walk)
+	if audio_start_player != null: audio_start_player.volume_db = _lin_to_db(vol_sfx)
+	if audio_win_player != null: audio_win_player.volume_db = _lin_to_db(vol_sfx)
+	if audio_wolf_player != null: audio_wolf_player.volume_db = _lin_to_db(vol_sfx)
+	if audio_caught_player != null: audio_caught_player.volume_db = _lin_to_db(vol_sfx)
+	if audio_bgm_menu_player != null: audio_bgm_menu_player.volume_db = db_bgm
+	if audio_bgm_free_player != null: audio_bgm_free_player.volume_db = db_bgm
+	if audio_bgm_challenge_player != null: audio_bgm_challenge_player.volume_db = db_bgm
 
 func _start_new_game(level: int) -> void:
 	difficulty_level = level
@@ -213,32 +280,183 @@ func _update_player_focus() -> void:
 	offset_pos.x = vc_x - (player.pixel_position.x + player.size / 2.0) * camera_scale
 	offset_pos.y = vc_y - (player.pixel_position.y + player.size / 2.0) * camera_scale
 
+func _start_free_mode() -> void:
+	in_menu = false
+	game_mode = "free"
+	_switch_bgm("free")
+	if has_node("CanvasLayer/Sidebar"):
+		$CanvasLayer/Sidebar.visible = true
+	if has_node("CanvasLayer/HUDMargin"):
+		$CanvasLayer/HUDMargin.visible = true
+	_start_new_game(5)
+
+func _start_challenge_mode() -> void:
+	in_menu = false
+	game_mode = "challenge"
+	challenge_total_time = 0.0
+	challenge_total_score = 0
+	challenge_completed = false
+	_switch_bgm("challenge")
+	if has_node("CanvasLayer/Sidebar"):
+		$CanvasLayer/Sidebar.visible = true
+	if has_node("CanvasLayer/HUDMargin"):
+		$CanvasLayer/HUDMargin.visible = true
+	_start_new_game(1)
+
+func _return_to_main_menu() -> void:
+	in_menu = true
+	_switch_bgm("menu")
+	if has_node("CanvasLayer/Sidebar"):
+		$CanvasLayer/Sidebar.visible = false
+	if has_node("CanvasLayer/HUDMargin"):
+		$CanvasLayer/HUDMargin.visible = false
+	queue_redraw()
+
 func _unhandled_input(event: InputEvent) -> void:
+	var win_size = get_viewport_rect().size
+	var cx = win_size.x / 2.0
+	var cy = win_size.y / 2.0
+	var btn_free_rect = Rect2(cx - 260, cy - 176, 520, 68)
+	var btn_chal_rect = Rect2(cx - 260, cy - 96, 520, 68)
+
+	var sound_card_y = cy - 16
+	var walk_minus = Rect2(cx - 260 + 120, sound_card_y + 32, 28, 22)
+	var walk_plus = Rect2(cx - 260 + 348, sound_card_y + 32, 28, 22)
+	var walk_track = Rect2(cx - 260 + 158, sound_card_y + 39, 180, 8)
+
+	var sfx_minus = Rect2(cx - 260 + 120, sound_card_y + 59, 28, 22)
+	var sfx_plus = Rect2(cx - 260 + 348, sound_card_y + 59, 28, 22)
+	var sfx_track = Rect2(cx - 260 + 158, sound_card_y + 66, 180, 8)
+
+	var bgm_minus = Rect2(cx - 260 + 120, sound_card_y + 86, 28, 22)
+	var bgm_plus = Rect2(cx - 260 + 348, sound_card_y + 86, 28, 22)
+	var bgm_track = Rect2(cx - 260 + 158, sound_card_y + 93, 180, 8)
+
+	if in_menu:
+		if event is InputEventKey and event.pressed:
+			if event.keycode == KEY_ESCAPE:
+				get_tree().quit()
+			elif event.keycode in [KEY_1, KEY_KP_1, KEY_F]:
+				_start_free_mode()
+			elif event.keycode in [KEY_2, KEY_KP_2, KEY_C]:
+				_start_challenge_mode()
+		elif event is InputEventMouseButton:
+			if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+				if btn_free_rect.has_point(event.position):
+					_start_free_mode()
+				elif btn_chal_rect.has_point(event.position):
+					_start_challenge_mode()
+				elif walk_minus.has_point(event.position):
+					vol_walk = max(0.0, snapped(vol_walk - 0.05, 0.05))
+					_apply_volumes()
+					if audio_step_player != null: audio_step_player.play()
+					_save_best_records()
+					queue_redraw()
+				elif walk_plus.has_point(event.position):
+					vol_walk = min(1.0, snapped(vol_walk + 0.05, 0.05))
+					_apply_volumes()
+					if audio_step_player != null: audio_step_player.play()
+					_save_best_records()
+					queue_redraw()
+				elif walk_track.has_point(event.position):
+					dragging_slider = "walk"
+					vol_walk = clamp(snapped((event.position.x - walk_track.position.x) / walk_track.size.x, 0.05), 0.0, 1.0)
+					_apply_volumes()
+					if audio_step_player != null: audio_step_player.play()
+					_save_best_records()
+					queue_redraw()
+				elif sfx_minus.has_point(event.position):
+					vol_sfx = max(0.0, snapped(vol_sfx - 0.05, 0.05))
+					_apply_volumes()
+					if audio_start_player != null: audio_start_player.play()
+					_save_best_records()
+					queue_redraw()
+				elif sfx_plus.has_point(event.position):
+					vol_sfx = min(1.0, snapped(vol_sfx + 0.05, 0.05))
+					_apply_volumes()
+					if audio_start_player != null: audio_start_player.play()
+					_save_best_records()
+					queue_redraw()
+				elif sfx_track.has_point(event.position):
+					dragging_slider = "sfx"
+					vol_sfx = clamp(snapped((event.position.x - sfx_track.position.x) / sfx_track.size.x, 0.05), 0.0, 1.0)
+					_apply_volumes()
+					if audio_start_player != null: audio_start_player.play()
+					_save_best_records()
+					queue_redraw()
+				elif bgm_minus.has_point(event.position):
+					vol_bgm = max(0.0, snapped(vol_bgm - 0.05, 0.05))
+					_apply_volumes()
+					_save_best_records()
+					queue_redraw()
+				elif bgm_plus.has_point(event.position):
+					vol_bgm = min(1.0, snapped(vol_bgm + 0.05, 0.05))
+					_apply_volumes()
+					_save_best_records()
+					queue_redraw()
+				elif bgm_track.has_point(event.position):
+					dragging_slider = "bgm"
+					vol_bgm = clamp(snapped((event.position.x - bgm_track.position.x) / bgm_track.size.x, 0.05), 0.0, 1.0)
+					_apply_volumes()
+					_save_best_records()
+					queue_redraw()
+			elif not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+				dragging_slider = ""
+		elif event is InputEventMouseMotion and dragging_slider != "":
+			if dragging_slider == "walk":
+				vol_walk = clamp(snapped((event.position.x - walk_track.position.x) / walk_track.size.x, 0.05), 0.0, 1.0)
+			elif dragging_slider == "sfx":
+				vol_sfx = clamp(snapped((event.position.x - sfx_track.position.x) / sfx_track.size.x, 0.05), 0.0, 1.0)
+			elif dragging_slider == "bgm":
+				vol_bgm = clamp(snapped((event.position.x - bgm_track.position.x) / bgm_track.size.x, 0.05), 0.0, 1.0)
+			_apply_volumes()
+			_save_best_records()
+			queue_redraw()
+		return
+
 	if event is InputEventKey and event.pressed:
-		if event.keycode == KEY_ESCAPE:
-			get_tree().quit()
-		elif event.keycode == KEY_C or event.keycode == KEY_SPACE:
+		if event.keycode == KEY_ESCAPE or event.keycode == KEY_M:
+			_return_to_main_menu()
+		elif event.keycode == KEY_C:
 			if not following_player:
 				focus_player()
 			else:
 				fit_to_screen()
 			queue_redraw()
-		elif event.keycode >= KEY_1 and event.keycode <= KEY_9:
+		elif event.keycode == KEY_SPACE:
+			if won and game_mode == "challenge":
+				if difficulty_level < 10:
+					_start_new_game(difficulty_level + 1)
+				elif challenge_completed:
+					_start_challenge_mode()
+			else:
+				if not following_player:
+					focus_player()
+				else:
+					fit_to_screen()
+				queue_redraw()
+		elif (event.keycode >= KEY_1 and event.keycode <= KEY_9) and game_mode == "free":
 			_start_new_game(event.keycode - KEY_1 + 1)
-		elif event.keycode == KEY_0:
+		elif event.keycode == KEY_0 and game_mode == "free":
 			_start_new_game(10)
-		elif event.keycode == KEY_KP_1 and event.keycode <= KEY_KP_9:
+		elif (event.keycode >= KEY_KP_1 and event.keycode <= KEY_KP_9) and game_mode == "free":
 			_start_new_game(event.keycode - KEY_KP_1 + 1)
-		elif event.keycode == KEY_KP_0:
+		elif event.keycode == KEY_KP_0 and game_mode == "free":
 			_start_new_game(10)
-		elif event.keycode == KEY_EQUAL or event.keycode == KEY_KP_ADD:
+		elif (event.keycode == KEY_EQUAL or event.keycode == KEY_KP_ADD) and game_mode == "free":
 			if difficulty_level < 10:
 				_start_new_game(difficulty_level + 1)
-		elif event.keycode == KEY_MINUS or event.keycode == KEY_KP_SUBTRACT:
+		elif (event.keycode == KEY_MINUS or event.keycode == KEY_KP_SUBTRACT) and game_mode == "free":
 			if difficulty_level > 1:
 				_start_new_game(difficulty_level - 1)
 		elif event.keycode == KEY_R:
-			_start_new_game(difficulty_level)
+			if won and game_mode == "challenge":
+				if difficulty_level < 10:
+					_start_new_game(difficulty_level + 1)
+				elif challenge_completed:
+					_start_challenge_mode()
+			else:
+				_start_new_game(difficulty_level)
 		elif event.keycode == KEY_P:
 			current_skin_idx = (current_skin_idx + 1) % skin_list.size()
 			var skin_key = skin_list[current_skin_idx]
@@ -260,7 +478,6 @@ func _unhandled_input(event: InputEvent) -> void:
 					audio_wolf_player.play()
 
 	elif event is InputEventMouseButton:
-		var win_size = get_viewport_rect().size
 		if event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
 			if event.pressed:
 				if event.position.x < win_size.x - SIDEBAR_WIDTH and event.position.y > HUD_HEIGHT:
@@ -380,8 +597,23 @@ func _physics_process(delta: float) -> void:
 				last_round_score = base_score
 				score_doubled = false
 
-			total_score += last_round_score
-			_save_best_records()
+			if game_mode == "free":
+				total_score += last_round_score
+				_save_best_records()
+			elif game_mode == "challenge":
+				challenge_total_time += current_time_sec
+				challenge_total_score += last_round_score
+				if difficulty_level == 10:
+					challenge_completed = true
+					total_score += challenge_total_score
+					if challenge_best_time < 0.0 or challenge_total_time < challenge_best_time:
+						challenge_best_time = challenge_total_time
+					if challenge_total_score > challenge_best_score:
+						challenge_best_score = challenge_total_score
+					_save_best_records()
+				else:
+					_save_best_records()
+
 			_update_hud()
 
 			if audio_win_player != null:
@@ -413,39 +645,62 @@ func _update_hud() -> void:
 		total_score_label.text = "累计总分: %d 分" % total_score
 
 	if last_score_label != null:
-		if last_round_score > 0:
-			var d_str = " (破纪录翻倍!)" if score_doubled else ""
-			last_score_label.text = "本局得分: +%d 分%s" % [last_round_score, d_str]
-		elif caught_by_wolf:
-			last_score_label.text = "本局得分: 0 分 (被狼抓)"
+		if game_mode == "free":
+			if last_round_score > 0:
+				var d_str = " (破纪录翻倍!)" if score_doubled else ""
+				last_score_label.text = "本局得分: +%d 分%s" % [last_round_score, d_str]
+			elif caught_by_wolf:
+				last_score_label.text = "本局得分: 0 分 (被狼抓)"
+			else:
+				last_score_label.text = "本局得分: --"
 		else:
-			last_score_label.text = "本局得分: --"
+			last_score_label.text = "闯关累计得分: %d 分" % challenge_total_score
 
 	if level_label != null:
-		level_label.text = "当前关卡: %s 阶" % m.label
+		if game_mode == "free":
+			level_label.text = "当前关卡: %s 阶" % m.label
+		else:
+			level_label.text = "闯关进度: 第 %d / 10 阶" % difficulty_level
 
 	if points_info_label != null:
 		var base_pts = difficulty_level * 100
-		points_info_label.text = "通关: +%d分 | 破纪录: +%d分" % [base_pts, base_pts * 2]
+		if game_mode == "free":
+			points_info_label.text = "通关: +%d分 | 破纪录: +%d分" % [base_pts, base_pts * 2]
+		else:
+			points_info_label.text = "本阶得分: +%d分 (破纪录加倍)" % base_pts
 
 	if time_label != null:
 		var time_str = ("%.2f 秒" % current_time_sec) if timer_started else "按方向键开始"
-		time_label.text = "当前用时: %s" % time_str
+		if game_mode == "free":
+			time_label.text = "当前用时: %s" % time_str
+		else:
+			time_label.text = "本阶用时: %s" % time_str
 
 	if best_label != null:
-		var best_str = ("%.2f 秒" % best_records[difficulty_level]) if best_records.has(difficulty_level) else "无纪录"
-		best_label.text = "最佳纪录: %s" % best_str
+		if game_mode == "free":
+			var best_str = ("%.2f 秒" % best_records[difficulty_level]) if best_records.has(difficulty_level) else "无纪录"
+			best_label.text = "最佳纪录: %s" % best_str
+		else:
+			best_label.text = "闯关累计用时: %.2f 秒" % challenge_total_time
 
 	if status_label != null:
-		if won:
-			if score_doubled:
-				status_label.text = "🎉 成功通关！\n获得积分: +%d 分\n🏆 破纪录积分翻倍！\n👉 按 R 键继续下一局" % last_round_score
+		if game_mode == "challenge" and challenge_completed:
+			status_label.text = "🏆 大满贯全通关！\n1~10阶总用时: %.2f 秒\n获得全通总分: +%d 分\n👉 按 R 重测，按 M 返回主菜单" % [challenge_total_time, challenge_total_score]
+		elif won:
+			if game_mode == "free":
+				if score_doubled:
+					status_label.text = "🎉 成功通关！\n获得积分: +%d 分\n🏆 破纪录积分翻倍！\n👉 按 R 继续，按 M 返回主菜单" % last_round_score
+				else:
+					status_label.text = "🎉 成功通关！\n获得积分: +%d 分\n再接再厉，挑战更快速度！\n👉 按 R 继续，按 M 返回主菜单" % last_round_score
 			else:
-				status_label.text = "🎉 成功通关！\n获得积分: +%d 分\n再接再厉，挑战更快速度！\n👉 按 R 键继续下一局" % last_round_score
+				status_label.text = "🎉 突破第 %d 阶！\n获得积分: +%d 分\n👉 按 R / 空格进入第 %d 阶" % [difficulty_level, last_round_score, difficulty_level + 1]
 		elif caught_by_wolf:
-			status_label.text = "😱 被大灰狼抓住了！\n本局得分: 0 分\n👉 按 R 键重新开始"
+			status_label.text = "😱 被大灰狼抓住了！\n本局得分: 0 分\n👉 按 R 重新尝试本关"
 		else:
-			status_label.text = "🟢 正在闯关中...\n避开大灰狼到达小屋\n挑战用时最快纪录！"
+			if game_mode == "free":
+				status_label.text = "🟢 正在自由模式闯关...\n避开大灰狼到达小屋\n按 M 键可随时返回主菜单"
+			else:
+				status_label.text = "🟢 闯关挑战中 (%d/10阶)\n顺序挑战 1~10 阶全部迷宫\n创造最快全通时间与最高分！" % difficulty_level
 
 func _load_best_records() -> void:
 	var path = "user://best_records.json"
@@ -459,6 +714,16 @@ func _load_best_records() -> void:
 					for k in data.keys():
 						if str(k) == "total_score":
 							total_score = int(data[k])
+						elif str(k) == "challenge_best_time":
+							challenge_best_time = float(data[k])
+						elif str(k) == "challenge_best_score":
+							challenge_best_score = int(data[k])
+						elif str(k) == "vol_walk":
+							vol_walk = float(data[k])
+						elif str(k) == "vol_sfx":
+							vol_sfx = float(data[k])
+						elif str(k) == "vol_bgm":
+							vol_bgm = float(data[k])
 						else:
 							best_records[int(k)] = float(data[k])
 
@@ -469,13 +734,24 @@ func _save_best_records() -> void:
 		for k in best_records.keys():
 			data[str(k)] = float(best_records[k])
 		data["total_score"] = total_score
+		if challenge_best_time >= 0.0:
+			data["challenge_best_time"] = challenge_best_time
+		data["challenge_best_score"] = challenge_best_score
+		data["vol_walk"] = snapped(vol_walk, 0.01)
+		data["vol_sfx"] = snapped(vol_sfx, 0.01)
+		data["vol_bgm"] = snapped(vol_bgm, 0.01)
 		file.store_string(JSON.stringify(data))
 
 func _draw() -> void:
+	var win_size = get_viewport_rect().size
+
+	if in_menu:
+		_draw_main_menu(win_size)
+		return
+
 	if maze_data == null:
 		return
 
-	var win_size = get_viewport_rect().size
 	var maze_w = win_size.x - SIDEBAR_WIDTH
 
 	# 背景填充
@@ -511,6 +787,83 @@ func _draw() -> void:
 
 	# HUD 顶栏背景
 	draw_rect(Rect2(0, 0, maze_w, HUD_HEIGHT), COLOR_HUD_BG)
+
+func _draw_main_menu(win_size: Vector2) -> void:
+	draw_rect(Rect2(Vector2.ZERO, win_size), Color(0.05, 0.06, 0.10))
+	var cx = win_size.x / 2.0
+	var cy = win_size.y / 2.0
+
+	var font_default = ThemeDB.fallback_font
+	if font_default == null:
+		return
+
+	# 1. 标题与副标题
+	draw_string(font_default, Vector2(cx - 180, cy - 235), "🎮 小红帽迷宫大冒险", HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(1, 0.88, 0.35))
+	draw_string(font_default, Vector2(cx - 180, cy - 198), "—— 请选择游戏模式 & 调整声音设置 ——", HORIZONTAL_ALIGNMENT_CENTER, -1, 16, Color(0.67, 0.75, 0.85))
+
+	# 2. 模式 1：自由模式 (Free Mode)
+	var btn1_rect = Rect2(cx - 260, cy - 176, 520, 68)
+	draw_rect(btn1_rect, Color(0.09, 0.13, 0.20))
+	draw_rect(btn1_rect, Color(0.39, 0.70, 1.0), false, 1.5)
+
+	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 28), "🌟 1. 自由模式 (Free Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.94, 0.6))
+	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 52), "按 [1] 键或点击 | 1~10 阶自由切换，无限切关与随心练习", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
+
+	# 3. 模式 2：闯关模式 (Challenge Mode)
+	var btn2_rect = Rect2(cx - 260, cy - 96, 520, 68)
+	draw_rect(btn2_rect, Color(0.09, 0.13, 0.20))
+	draw_rect(btn2_rect, Color(1.0, 0.82, 0.35), false, 1.5)
+
+	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 28), "🏆 2. 闯关模式 (Challenge Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.86, 0.35))
+	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 52), "按 [2] 键或点击 | 从 1 阶连续闯关至 10 阶，结算总用时与得分", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
+
+	# 4. 卡片 3：🎵 声音大小设置 (Sound Settings)
+	var sound_card = Rect2(cx - 260, cy - 16, 520, 120)
+	draw_rect(sound_card, Color(0.09, 0.13, 0.20))
+	draw_rect(sound_card, Color(0.24, 0.35, 0.55), false, 1.0)
+
+	draw_string(font_default, Vector2(sound_card.position.x + 16, sound_card.position.y + 24), "🎵 声音大小设置", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.86, 0.35))
+
+	var _draw_vol_row = func(label: String, y_pos: float, vol: float):
+		draw_string(font_default, Vector2(sound_card.position.x + 16, y_pos + 15), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.86, 0.90, 0.96))
+
+		var bm = Rect2(sound_card.position.x + 120, y_pos, 28, 22)
+		draw_rect(bm, Color(0.18, 0.26, 0.38))
+		draw_rect(bm, Color(0.39, 0.55, 0.75), false, 1.0)
+		draw_string(font_default, Vector2(bm.position.x + 10, bm.position.y + 16), "-", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1))
+
+		var track = Rect2(sound_card.position.x + 158, y_pos + 7, 180, 8)
+		draw_rect(track, Color(0.16, 0.20, 0.29))
+		var fill_w = vol * track.size.x
+		if fill_w > 0:
+			draw_rect(Rect2(track.position, Vector2(fill_w, track.size.y)), Color(0.39, 0.75, 1.0))
+		draw_circle(Vector2(track.position.x + fill_w, track.position.y + 4), 6.0, Color(1.0, 0.92, 0.55))
+
+		var bp = Rect2(sound_card.position.x + 348, y_pos, 28, 22)
+		draw_rect(bp, Color(0.18, 0.26, 0.38))
+		draw_rect(bp, Color(0.39, 0.55, 0.75), false, 1.0)
+		draw_string(font_default, Vector2(bp.position.x + 8, bp.position.y + 16), "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1))
+
+		draw_string(font_default, Vector2(sound_card.position.x + 388, y_pos + 16), "%d%%" % int(round(vol * 100.0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1.0, 0.92, 0.59))
+
+	_draw_vol_row.call("🚶 走路音效", sound_card.position.y + 32, vol_walk)
+	_draw_vol_row.call("🔔 提示音效", sound_card.position.y + 59, vol_sfx)
+	_draw_vol_row.call("🎵 背景音乐", sound_card.position.y + 86, vol_bgm)
+
+	# 5. 排行榜纪录卡片
+	var card_rect = Rect2(cx - 260, cy + 116, 520, 75)
+	draw_rect(card_rect, Color(0.07, 0.10, 0.16))
+	draw_rect(card_rect, Color(0.16, 0.23, 0.35), false, 1.0)
+
+	draw_string(font_default, Vector2(card_rect.position.x + 16, card_rect.position.y + 22), "📊 荣耀排行榜纪录", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 0.84, 0.31))
+	draw_string(font_default, Vector2(card_rect.position.x + 16, card_rect.position.y + 44), "累计总得分: %d 分" % total_score, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.88, 0.96))
+
+	var c_time_str = "%.2f 秒" % challenge_best_time if challenge_best_time >= 0.0 else "暂无纪录"
+	var c_score_str = "%d 分" % challenge_best_score if challenge_best_score > 0 else "暂无纪录"
+	draw_string(font_default, Vector2(card_rect.position.x + 16, card_rect.position.y + 64), "闯关模式最佳全通: %s | 最高得分: %s" % [c_time_str, c_score_str], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.71, 0.82, 1.0))
+
+	# 6. 提示
+	draw_string(font_default, Vector2(cx - 210, win_size.y - 22), "👉 点击模式或调音按钮 | 按 [1]/[2] 启动模式 | 按 [ESC] 退出程序", HORIZONTAL_ALIGNMENT_CENTER, -1, 13, Color(0.51, 0.59, 0.69))
 
 func _draw_tile_marker(tile: Vector2i, color: Color, type: String) -> void:
 	var p1 = offset_pos + Vector2(tile.x * CELL_SIZE, tile.y * CELL_SIZE) * camera_scale
