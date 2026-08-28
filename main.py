@@ -6,6 +6,7 @@ import json
 import math
 import os
 import sys
+import time
 
 RECORDS_FILE = "best_records.json"
 
@@ -87,6 +88,9 @@ from assets import (
     create_sound_bgm_dungeon,
     create_sound_bgm_free,
     create_sound_bgm_menu,
+    create_sound_bgm_pattern,
+    create_sound_bgm_shape,
+    create_sound_bgm_woven,
     create_sound_caught,
     create_sound_start,
     create_sound_step,
@@ -291,7 +295,7 @@ def _make_maze(world: int = 1, level: int = 1) -> Maze:
 
 
 def _window_size(maze: Maze) -> tuple[int, int]:
-    """根据地图大小动态计算合适的窗口物理尺寸，不超过桌面允许的最大范围。"""
+    """根据地图大小动态计算合适的窗口物理尺寸，保证主界面菜单与地图完全显示。"""
     try:
         sizes = pygame.display.get_desktop_sizes()
         if sizes and sizes[0][0] >= 640 and sizes[0][1] >= 480:
@@ -299,12 +303,12 @@ def _window_size(maze: Maze) -> tuple[int, int]:
         else:
             info = pygame.display.Info()
             screen_w = info.current_w if info.current_w >= 640 else 1280
-            screen_h = info.current_h if info.current_h >= 480 else 800
+            screen_h = info.current_h if info.current_h >= 800 else 800
     except Exception:
         screen_w, screen_h = 1280, 800
 
-    desired_w = max(maze.cols * CELL_SIZE + SIDEBAR_WIDTH + 16, 880)
-    desired_h = maze.rows * CELL_SIZE + HUD_HEIGHT + 16
+    desired_w = max(maze.cols * CELL_SIZE + SIDEBAR_WIDTH + 16, 960)
+    desired_h = max(maze.rows * CELL_SIZE + HUD_HEIGHT + 16, 720)
 
     # 限制窗口最大宽高，留出桌面任务栏/菜单栏空间
     max_w = int(screen_w * 0.92)
@@ -442,6 +446,9 @@ def main() -> None:
     sound_bgm_free = create_sound_bgm_free()
     sound_bgm_challenge = create_sound_bgm_challenge()
     sound_bgm_dungeon = create_sound_bgm_dungeon()
+    sound_bgm_pattern = create_sound_bgm_pattern()
+    sound_bgm_shape = create_sound_bgm_shape()
+    sound_bgm_woven = create_sound_bgm_woven()
     current_bgm_key: str | None = None
 
     # 生成图形资产
@@ -498,6 +505,12 @@ def main() -> None:
             sound_bgm_challenge.set_volume(vol_bgm)
         if sound_bgm_dungeon:
             sound_bgm_dungeon.set_volume(vol_bgm)
+        if sound_bgm_pattern:
+            sound_bgm_pattern.set_volume(vol_bgm)
+        if sound_bgm_shape:
+            sound_bgm_shape.set_volume(vol_bgm)
+        if sound_bgm_woven:
+            sound_bgm_woven.set_volume(vol_bgm)
 
     def switch_bgm(key: str):
         nonlocal current_bgm_key
@@ -511,6 +524,12 @@ def main() -> None:
             sound_bgm_challenge.stop()
         if sound_bgm_dungeon:
             sound_bgm_dungeon.stop()
+        if sound_bgm_pattern:
+            sound_bgm_pattern.stop()
+        if sound_bgm_shape:
+            sound_bgm_shape.stop()
+        if sound_bgm_woven:
+            sound_bgm_woven.stop()
 
         current_bgm_key = key
         target = None
@@ -522,6 +541,12 @@ def main() -> None:
             target = sound_bgm_challenge
         elif key == "dungeon":
             target = sound_bgm_dungeon
+        elif key == "pattern":
+            target = sound_bgm_pattern
+        elif key == "shape":
+            target = sound_bgm_shape
+        elif key == "woven":
+            target = sound_bgm_woven
 
         if target:
             target.set_volume(vol_bgm)
@@ -566,9 +591,22 @@ def main() -> None:
         else:
             auto_path_phase = "idle"
 
+    last_regen_time = 0.0
+    REGEN_COOLDOWN = 0.30  # 秒，防连按连续重新生成
+
+    def check_and_update_regen_cooldown() -> bool:
+        nonlocal last_regen_time
+        now = time.time()
+        if now - last_regen_time < REGEN_COOLDOWN:
+            return False
+        last_regen_time = now
+        return True
+
     def reset_level_state():
         nonlocal maze, screen, player, wolf, camera, won, caught_by_wolf, timer_started, start_time_ms, current_time_sec, auto_advance_timer
         nonlocal auto_visited_order, auto_path, auto_parent_map, auto_search_idx, auto_path_idx, auto_path_phase
+        if not check_and_update_regen_cooldown():
+            return
         maze = _make_maze(current_world, difficulty_level)
         screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
         player = _spawn_player(maze)
@@ -594,7 +632,13 @@ def main() -> None:
             auto_path_idx = 0.0
             auto_path_phase = "idle"
 
-        if current_world == 2:
+        if current_world == 5:
+            switch_bgm("woven")
+        elif current_world == 4:
+            switch_bgm("shape")
+        elif current_world == 3:
+            switch_bgm("pattern")
+        elif current_world == 2:
             switch_bgm("dungeon")
         elif game_mode == "challenge":
             switch_bgm("challenge")
@@ -603,6 +647,9 @@ def main() -> None:
 
         if sound_start:
             sound_start.play()
+
+        pygame.event.clear(pygame.KEYDOWN)
+        pygame.event.clear(pygame.MOUSEBUTTONDOWN)
 
     def start_free_mode(world: int = 1, level: int = 1):
         nonlocal in_menu, game_mode, current_world, difficulty_level
@@ -636,6 +683,27 @@ def main() -> None:
             elif current_world == 2:
                 if difficulty_level < 10:
                     difficulty_level += 1
+                else:
+                    current_world = 3
+                    difficulty_level = 1
+                reset_level_state()
+            elif current_world == 3:
+                if difficulty_level < 10:
+                    difficulty_level += 1
+                else:
+                    current_world = 4
+                    difficulty_level = 1
+                reset_level_state()
+            elif current_world == 4:
+                if difficulty_level < 10:
+                    difficulty_level += 1
+                else:
+                    current_world = 5
+                    difficulty_level = 1
+                reset_level_state()
+            elif current_world == 5:
+                if difficulty_level < 10:
+                    difficulty_level += 1
                     reset_level_state()
                 else:
                     start_challenge_mode()
@@ -645,6 +713,15 @@ def main() -> None:
             else:
                 if current_world == 1:
                     current_world = 2
+                    difficulty_level = 1
+                elif current_world == 2:
+                    current_world = 3
+                    difficulty_level = 1
+                elif current_world == 3:
+                    current_world = 4
+                    difficulty_level = 1
+                elif current_world == 4:
+                    current_world = 5
                     difficulty_level = 1
                 else:
                     current_world = 1
@@ -656,11 +733,20 @@ def main() -> None:
         if difficulty_level > 1:
             difficulty_level -= 1
         else:
-            if current_world == 2:
+            if current_world == 5:
+                current_world = 4
+                difficulty_level = 10
+            elif current_world == 4:
+                current_world = 3
+                difficulty_level = 10
+            elif current_world == 3:
+                current_world = 2
+                difficulty_level = 10
+            elif current_world == 2:
                 current_world = 1
                 difficulty_level = 10
             else:
-                current_world = 2
+                current_world = 5
                 difficulty_level = 10
         reset_level_state()
 
@@ -936,7 +1022,7 @@ def main() -> None:
                 elif game_mode == "challenge":
                     challenge_total_time += current_time_sec
                     challenge_total_score += last_round_score
-                    if current_world == 2 and difficulty_level == 10:
+                    if current_world == 5 and difficulty_level == 10:
                         challenge_completed = True
                         total_score += challenge_total_score
                         if (
@@ -1066,8 +1152,8 @@ def _draw_main_menu(
     card_w = 560
 
     # 2. 模式 1 按钮：自由模式 (Free Mode)
-    btn1_h = 58
-    btn1_rect = pygame.Rect(cx - card_w // 2, cy - 188, card_w, btn1_h)
+    btn1_h = 56
+    btn1_rect = pygame.Rect(cx - card_w // 2, cy - 215, card_w, btn1_h)
     hover1 = btn1_rect.collidepoint(mouse_pos)
 
     bg_color1 = (32, 48, 74) if hover1 else (22, 32, 52)
@@ -1076,14 +1162,14 @@ def _draw_main_menu(
     pygame.draw.rect(screen, border_color1, btn1_rect, width=2 if hover1 else 1, border_radius=10)
 
     t1 = font.render("🌟 1. 自由模式 (Free Mode)", True, (255, 240, 150) if hover1 else (230, 235, 245))
-    screen.blit(t1, (btn1_rect.x + 18, btn1_rect.y + 8))
+    screen.blit(t1, (btn1_rect.x + 18, btn1_rect.y + 6))
 
     desc1 = font.render("按 [1] 键或点击 | 1~10 阶自由切换，无限切关与随心练习", True, (160, 180, 205))
-    screen.blit(desc1, (btn1_rect.x + 18, btn1_rect.y + 32))
+    screen.blit(desc1, (btn1_rect.x + 18, btn1_rect.y + 30))
 
     # 3. 模式 2 按钮：闯关模式 (Challenge Mode)
-    btn2_h = 58
-    btn2_rect = pygame.Rect(cx - card_w // 2, cy - 122, card_w, btn2_h)
+    btn2_h = 56
+    btn2_rect = pygame.Rect(cx - card_w // 2, cy - 153, card_w, btn2_h)
     hover2 = btn2_rect.collidepoint(mouse_pos)
 
     bg_color2 = (32, 48, 74) if hover2 else (22, 32, 52)
@@ -1092,14 +1178,14 @@ def _draw_main_menu(
     pygame.draw.rect(screen, border_color2, btn2_rect, width=2 if hover2 else 1, border_radius=10)
 
     t2 = font.render("🏆 2. 闯关模式 (Challenge Mode)", True, (255, 220, 90) if hover2 else (230, 235, 245))
-    screen.blit(t2, (btn2_rect.x + 18, btn2_rect.y + 8))
+    screen.blit(t2, (btn2_rect.x + 18, btn2_rect.y + 6))
 
-    desc2 = font.render("按 [2] 键或点击 | 第一大关 (1~10阶) + 第二大关 (1~10阶) 共 20 关连续挑战", True, (160, 180, 205))
-    screen.blit(desc2, (btn2_rect.x + 18, btn2_rect.y + 32))
+    desc2 = font.render("按 [2] 键或点击 | 森林 + 地牢 + 秘境 + 异形 + 立交 共 50 关连续大满贯", True, (160, 180, 205))
+    screen.blit(desc2, (btn2_rect.x + 18, btn2_rect.y + 30))
 
-    # 4. 卡片 3：🎯 调试/自由选关卡片 (与 Godot 完全对齐)
-    lvl_card_h = 74
-    lvl_card = pygame.Rect(cx - card_w // 2, cy - 56, card_w, lvl_card_h)
+    # 4. 卡片 3：🎯 调试/自由选关卡片 (五大关 50 阶)
+    lvl_card_h = 166
+    lvl_card = pygame.Rect(cx - card_w // 2, cy - 91, card_w, lvl_card_h)
     pygame.draw.rect(screen, (22, 32, 50), lvl_card, border_radius=10)
     pygame.draw.rect(screen, (60, 90, 140), lvl_card, width=1, border_radius=10)
 
@@ -1107,10 +1193,10 @@ def _draw_main_menu(
 
     # 第一大关选关 (1~10 阶)
     lbl1 = small_font.render("🌲 第一大关 (绿野森林):", True, (130, 230, 150))
-    screen.blit(lbl1, (lvl_card.x + 14, lvl_card.y + 10))
+    screen.blit(lbl1, (lvl_card.x + 14, lvl_card.y + 8))
     for i in range(1, 11):
         bx = lvl_card.x + 200 + (i - 1) * 34
-        by = lvl_card.y + 8
+        by = lvl_card.y + 6
         brect = pygame.Rect(bx, by, 30, 24)
         menu_level_rects[(1, i)] = brect
         h_l = brect.collidepoint(mouse_pos)
@@ -1121,10 +1207,10 @@ def _draw_main_menu(
 
     # 第二大关选关 (1~10 阶)
     lbl2 = small_font.render("🏰 第二大关 (狼穴地牢):", True, (255, 130, 130))
-    screen.blit(lbl2, (lvl_card.x + 14, lvl_card.y + 44))
+    screen.blit(lbl2, (lvl_card.x + 14, lvl_card.y + 39))
     for i in range(1, 11):
         bx = lvl_card.x + 200 + (i - 1) * 34
-        by = lvl_card.y + 42
+        by = lvl_card.y + 37
         brect = pygame.Rect(bx, by, 30, 24)
         menu_level_rects[(2, i)] = brect
         h_l = brect.collidepoint(mouse_pos)
@@ -1133,9 +1219,51 @@ def _draw_main_menu(
         ts = small_font.render(str(i), True, (255, 240, 150) if h_l else (235, 210, 220))
         screen.blit(ts, ts.get_rect(center=brect.center))
 
+    # 第三大关选关 (1~10 阶)
+    lbl3 = small_font.render("🌟 第三大关 (图案秘境):", True, (210, 140, 255))
+    screen.blit(lbl3, (lvl_card.x + 14, lvl_card.y + 70))
+    for i in range(1, 11):
+        bx = lvl_card.x + 200 + (i - 1) * 34
+        by = lvl_card.y + 68
+        brect = pygame.Rect(bx, by, 30, 24)
+        menu_level_rects[(3, i)] = brect
+        h_l = brect.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (88, 38, 108) if h_l else (48, 22, 62), brect, border_radius=4)
+        pygame.draw.rect(screen, (210, 140, 255) if h_l else (140, 60, 180), brect, width=1, border_radius=4)
+        ts = small_font.render(str(i), True, (255, 240, 150) if h_l else (235, 210, 250))
+        screen.blit(ts, ts.get_rect(center=brect.center))
+
+    # 第四大关选关 (1~10 阶)
+    lbl4 = small_font.render("🌀 第四大关 (异形几何):", True, (100, 230, 220))
+    screen.blit(lbl4, (lvl_card.x + 14, lvl_card.y + 101))
+    for i in range(1, 11):
+        bx = lvl_card.x + 200 + (i - 1) * 34
+        by = lvl_card.y + 99
+        brect = pygame.Rect(bx, by, 30, 24)
+        menu_level_rects[(4, i)] = brect
+        h_l = brect.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (38, 98, 98) if h_l else (22, 56, 56), brect, border_radius=4)
+        pygame.draw.rect(screen, (100, 230, 220) if h_l else (60, 160, 150), brect, width=1, border_radius=4)
+        ts = small_font.render(str(i), True, (255, 240, 150) if h_l else (210, 245, 240))
+        screen.blit(ts, ts.get_rect(center=brect.center))
+
+    # 第五大关选关 (1~10 阶)
+    lbl5 = small_font.render("🌉 第五大关 (立交编织):", True, (120, 220, 255))
+    screen.blit(lbl5, (lvl_card.x + 14, lvl_card.y + 132))
+    for i in range(1, 11):
+        bx = lvl_card.x + 200 + (i - 1) * 34
+        by = lvl_card.y + 130
+        brect = pygame.Rect(bx, by, 30, 24)
+        menu_level_rects[(5, i)] = brect
+        h_l = brect.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (38, 78, 108) if h_l else (22, 44, 68), brect, border_radius=4)
+        pygame.draw.rect(screen, (120, 220, 255) if h_l else (60, 140, 180), brect, width=1, border_radius=4)
+        ts = small_font.render(str(i), True, (255, 240, 150) if h_l else (210, 235, 250))
+        screen.blit(ts, ts.get_rect(center=brect.center))
+
     # 5. 卡片 4：🎵 声音大小设置 (Sound Volume Settings)
-    c3_h = 115
-    c3_rect = pygame.Rect(cx - card_w // 2, cy + 24, card_w, c3_h)
+    c3_h = 112
+    c3_rect = pygame.Rect(cx - card_w // 2, cy + 81, card_w, c3_h)
     pygame.draw.rect(screen, (22, 32, 50), c3_rect, border_radius=10)
     pygame.draw.rect(screen, (60, 90, 140), c3_rect, width=1, border_radius=10)
 
@@ -1198,7 +1326,7 @@ def _draw_main_menu(
 
     # 6. 卡片 5：底部荣耀纪录卡片 (Statistics Card)
     card4_h = 68
-    card4_rect = pygame.Rect(cx - card_w // 2, cy + 147, card_w, card4_h)
+    card4_rect = pygame.Rect(cx - card_w // 2, cy + 175, card_w, card4_h)
     pygame.draw.rect(screen, (18, 26, 40), card4_rect, border_radius=10)
     pygame.draw.rect(screen, (40, 58, 88), card4_rect, width=1, border_radius=10)
 
@@ -1225,6 +1353,182 @@ def _draw_main_menu(
     screen.blit(hint_surf, hint_rect)
 
     return btn1_rect, btn2_rect, sound_rects, menu_level_rects
+
+
+def _draw_ramp_slope(screen: pygame.Surface, rect: pygame.Rect, scale: float, direction: str):
+    """绘制靠近立交桥路格上的 3D 起伏坡道 (坡道纵深渐变与侧边挡板)"""
+    if rect.w < 6 or rect.h < 6:
+        return
+    bw = max(4, int(rect.w * 0.68))
+    bx = rect.centerx - bw // 2
+
+    # 渐变坡道
+    for i in range(rect.h):
+        factor = i / float(rect.h) if direction == "south" else (rect.h - 1 - i) / float(rect.h)
+        r = int(25 + factor * 35)
+        g = int(90 + factor * 55)
+        b = int(110 + factor * 75)
+        pygame.draw.line(screen, (r, g, b), (bx, rect.top + i), (bx + bw, rect.top + i), width=1)
+
+    # 两侧引桥护栏引导线
+    rail_w = max(1, int(scale * 1.5))
+    pygame.draw.line(screen, (100, 200, 240), (bx, rect.top), (bx, rect.bottom), width=rail_w)
+    pygame.draw.line(screen, (100, 200, 240), (bx + bw, rect.top), (bx + bw, rect.bottom), width=rail_w)
+
+
+def _draw_overpass_underpass(
+    screen: pygame.Surface, rect: pygame.Rect, scale: float, cur_path: tuple[int, int, int], cur_wall: tuple[int, int, int]
+):
+    """绘制 2.5D 南北向立交桥 - 地下东西方向隧道底色与上下洞口黑框墙线"""
+    # 1. 隧道底色 (稍深于普通路径，呈现地下深度)
+    tunnel_bg = (max(0, cur_path[0] - 10), max(0, cur_path[1] - 15), max(0, cur_path[2] - 20))
+    pygame.draw.rect(screen, tunnel_bg, rect)
+
+    # 2. 上下洞口黑框墙线 (混凝土侧墙)
+    line_w = max(1, int(scale * 1.5))
+    pygame.draw.line(screen, cur_wall, (rect.left, rect.top), (rect.right, rect.top), width=line_w)
+    pygame.draw.line(screen, cur_wall, (rect.left, rect.bottom - 1), (rect.right, rect.bottom - 1), width=line_w)
+
+    # 3. 隧道暗部阴影 (使人在隧道下方时产生深景邃暗感)
+    shadow_surf = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
+    shadow_surf.fill((2, 5, 12, 100))
+    screen.blit(shadow_surf, rect.topleft)
+
+
+def _draw_overpass_bridge_deck(screen: pygame.Surface, rect: pygame.Rect, scale: float, cur_wall: tuple[int, int, int]):
+    """绘制 2.5D 南北向高架桥面 - 南北方向立体桥面、两侧护栏与 3D 投射阴影"""
+    bw = max(4, int(rect.w * 0.70))
+    bx = rect.centerx - bw // 2
+
+    # 1. 3D 投射阴影 (Drop Shadow 覆盖地面)
+    shadow_off_x = max(2, int(scale * 3.5))
+    shadow_off_y = max(1, int(scale * 2.0))
+    shadow_rect = pygame.Rect(bx + shadow_off_x, rect.top + shadow_off_y, bw, rect.h)
+    shadow_surf = pygame.Surface((shadow_rect.w, shadow_rect.h), pygame.SRCALPHA)
+    shadow_surf.fill((2, 5, 12, 140))
+    screen.blit(shadow_surf, shadow_rect.topleft)
+
+    # 2. 南北高架桥纯净路面 (高出地面)
+    bridge_deck = pygame.Rect(bx, rect.top, bw, rect.h)
+    pygame.draw.rect(screen, (245, 248, 255), bridge_deck)
+
+    # 3. 左右 3D 黑色桥壁框线
+    line_w = max(1, int(scale * 1.5))
+    pygame.draw.line(screen, cur_wall, (bx, rect.top), (bx, rect.bottom), width=line_w)
+    pygame.draw.line(screen, cur_wall, (bx + bw - 1, rect.top), (bx + bw - 1, rect.bottom), width=line_w)
+
+    # 4. 桥内两侧高对比红色彩线护栏
+    if rect.w >= 8:
+        pygame.draw.line(screen, (220, 40, 40), (bx + 2, rect.top), (bx + 2, rect.bottom), width=1)
+        pygame.draw.line(screen, (220, 40, 40), (bx + bw - 3, rect.top), (bx + bw - 3, rect.bottom), width=1)
+
+
+def _draw_overpass_ew_underpass(
+    screen: pygame.Surface, rect: pygame.Rect, scale: float, cur_path: tuple[int, int, int], cur_wall: tuple[int, int, int]
+):
+    """绘制 2.5D 东西向立交桥 - 地下南北方向隧道底色与左右洞口黑框墙线"""
+    tunnel_bg = (max(0, cur_path[0] - 10), max(0, cur_path[1] - 15), max(0, cur_path[2] - 20))
+    pygame.draw.rect(screen, tunnel_bg, rect)
+
+    line_w = max(1, int(scale * 1.5))
+    pygame.draw.line(screen, cur_wall, (rect.left, rect.top), (rect.left, rect.bottom), width=line_w)
+    pygame.draw.line(screen, cur_wall, (rect.right - 1, rect.top), (rect.right - 1, rect.bottom), width=line_w)
+
+    shadow_surf = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
+    shadow_surf.fill((2, 5, 12, 100))
+    screen.blit(shadow_surf, rect.topleft)
+
+
+def _draw_overpass_ew_bridge_deck(screen: pygame.Surface, rect: pygame.Rect, scale: float, cur_wall: tuple[int, int, int]):
+    """绘制 2.5D 东西向高架桥面 - 东西方向立体桥面、上下护栏与 3D 投射阴影"""
+    bh = max(4, int(rect.h * 0.70))
+    by = rect.centery - bh // 2
+
+    shadow_off_x = max(2, int(scale * 3.5))
+    shadow_off_y = max(1, int(scale * 2.0))
+    shadow_rect = pygame.Rect(rect.left + shadow_off_x, by + shadow_off_y, rect.w, bh)
+    shadow_surf = pygame.Surface((shadow_rect.w, shadow_rect.h), pygame.SRCALPHA)
+    shadow_surf.fill((2, 5, 12, 140))
+    screen.blit(shadow_surf, shadow_rect.topleft)
+
+    bridge_deck = pygame.Rect(rect.left, by, rect.w, bh)
+    pygame.draw.rect(screen, (245, 248, 255), bridge_deck)
+
+    line_w = max(1, int(scale * 1.5))
+    pygame.draw.line(screen, cur_wall, (rect.left, by), (rect.right, by), width=line_w)
+    pygame.draw.line(screen, cur_wall, (rect.left, by + bh - 1), (rect.right, by + bh - 1), width=line_w)
+
+    if rect.h >= 8:
+        pygame.draw.line(screen, (220, 40, 40), (rect.left, by + 2), (rect.right, by + 2), width=1)
+        pygame.draw.line(screen, (220, 40, 40), (rect.left, by + bh - 3), (rect.right, by + bh - 3), width=1)
+
+
+def _draw_player_sprite(
+    screen: pygame.Surface,
+    camera: Camera,
+    player: Player,
+    player_sprites: dict[str, list[pygame.Surface]],
+    won: bool,
+    scale: float,
+):
+    center_wx, center_wy = player.rect.centerx, player.rect.centery
+    draw_w = CELL_SIZE * 1.25
+    draw_h = CELL_SIZE * 1.25
+    px1, py1 = camera.world_to_screen(center_wx - draw_w / 2.0, center_wy - draw_h / 2.0)
+    px2, py2 = camera.world_to_screen(center_wx + draw_w / 2.0, center_wy + draw_h / 2.0)
+    player_draw_rect = pygame.Rect(
+        int(px1),
+        int(py1),
+        max(1, int(px2 - px1)),
+        max(1, int(py2 - py1)),
+    )
+
+    bounce_y = 0.0
+    if won:
+        bounce_y = abs(math.sin(pygame.time.get_ticks() * 0.012)) * (player_draw_rect.h * 0.25)
+
+    player_render_rect = pygame.Rect(
+        player_draw_rect.x,
+        int(player_draw_rect.y - bounce_y),
+        player_draw_rect.w,
+        player_draw_rect.h,
+    )
+
+    if player_render_rect.w >= 4 and player_render_rect.h >= 4:
+        facing_sprites = player_sprites.get(player.facing, player_sprites["down"])
+        cur_sprite = facing_sprites[player.anim_frame % len(facing_sprites)]
+        scaled_player = pygame.transform.smoothscale(cur_sprite, (player_render_rect.w, player_render_rect.h))
+        screen.blit(scaled_player, player_render_rect.topleft)
+    else:
+        radius = max(0, int(4 * scale))
+        pygame.draw.rect(screen, COLOR_PLAYER, player_render_rect, border_radius=radius)
+
+
+def _draw_wolf_sprite(
+    screen: pygame.Surface,
+    camera: Camera,
+    wolf: Wolf,
+    wolf_sprites: dict[str, list[pygame.Surface]],
+):
+    if not wolf.active:
+        return
+    w_draw_w = CELL_SIZE * 1.35
+    w_draw_h = CELL_SIZE * 1.35
+    w_px1, w_py1 = camera.world_to_screen(wolf.x - w_draw_w / 2.0, wolf.y - w_draw_h / 2.0)
+    w_px2, w_py2 = camera.world_to_screen(wolf.x + w_draw_w / 2.0, wolf.y + w_draw_h / 2.0)
+    wolf_draw_rect = pygame.Rect(
+        int(w_px1),
+        int(w_py1),
+        max(1, int(w_px2 - w_px1)),
+        max(1, int(w_py2 - w_py1)),
+    )
+
+    facing_key = "cry" if wolf.crying else wolf.facing
+    w_frames = wolf_sprites.get(facing_key, wolf_sprites.get("down", []))
+    if w_frames and wolf_draw_rect.w >= 4 and wolf_draw_rect.h >= 4:
+        cur_w_sprite = w_frames[wolf.anim_frame % len(w_frames)]
+        scaled_wolf = pygame.transform.smoothscale(cur_w_sprite, (wolf_draw_rect.w, wolf_draw_rect.h))
+        screen.blit(scaled_wolf, wolf_draw_rect.topleft)
 
 
 def _draw(
@@ -1262,7 +1566,22 @@ def _draw(
     auto_path_phase: str = "idle",
     auto_advance_timer: float = -1.0,
 ) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect]:
-    if current_world == 2:
+    if current_world == 5:
+        # 第五大关：立体立交赛博风 (深蓝地色、灰蓝墙体、天蓝高架通廊)
+        cur_bg = (12, 16, 28)
+        cur_wall = (35, 45, 65)
+        cur_path = (25, 90, 110)
+    elif current_world == 4:
+        # 第四大关：异形几何科技青蓝调
+        cur_bg = (10, 24, 32)
+        cur_wall = (25, 75, 95)
+        cur_path = (35, 120, 110)
+    elif current_world == 3:
+        # 第三大关：图案秘境梦幻星空紫调
+        cur_bg = (18, 12, 32)
+        cur_wall = (45, 30, 68)
+        cur_path = (30, 80, 110)
+    elif current_world == 2:
         # 第二大关：狼穴地牢暗黑绯红调
         cur_bg = (20, 10, 16)
         cur_wall = (42, 20, 32)
@@ -1290,6 +1609,28 @@ def _draw(
     min_tile_y = max(0, int(min_wy // CELL_SIZE))
     max_tile_y = min(maze.rows - 1, int(max_wy // CELL_SIZE))
 
+    # 计算角色与大灰狼是否位于东西或南北地下隧道内 (在桥下方)
+    p_tx = int(player.rect.centerx // CELL_SIZE)
+    p_ty = int(player.rect.centery // CELL_SIZE)
+    p_in_tunnel = False
+    if 0 <= p_tx < maze.cols and 0 <= p_ty < maze.rows:
+        cur_t = maze.grid[p_ty][p_tx]
+        if cur_t == 2 and player.overpass_layer == "ew_tunnel":
+            p_in_tunnel = True
+        elif cur_t == 3 and player.overpass_layer == "ns_tunnel":
+            p_in_tunnel = True
+
+    w_tx = int(wolf.x // CELL_SIZE) if wolf.active else -1
+    w_ty = int(wolf.y // CELL_SIZE) if wolf.active else -1
+    wolf_layer = getattr(wolf, "overpass_layer", "none") if wolf.active else "none"
+    w_in_tunnel = False
+    if wolf.active and 0 <= w_tx < maze.cols and 0 <= w_ty < maze.rows:
+        cur_wt = maze.grid[w_ty][w_tx]
+        if cur_wt == 2 and wolf_layer == "ew_tunnel":
+            w_in_tunnel = True
+        elif cur_wt == 3 and wolf_layer == "ns_tunnel":
+            w_in_tunnel = True
+
     for y in range(min_tile_y, max_tile_y + 1):
         row = maze.grid[y]
         for x in range(min_tile_x, max_tile_x + 1):
@@ -1302,8 +1643,46 @@ def _draw(
                 max(1, int(math.ceil(x2 - x1))),
                 max(1, int(math.ceil(y2 - y1))),
             )
-            color = cur_wall if tile == 1 else cur_path
-            pygame.draw.rect(screen, color, rect)
+            if tile == 1:
+                pygame.draw.rect(screen, cur_wall, rect)
+            elif tile == 0:
+                color = cur_path
+                is_pattern = (hasattr(maze, "pattern_cells") and (x, y) in maze.pattern_cells)
+                is_shape = (current_world == 4 and hasattr(maze, "shape_cells") and (x, y) in maze.shape_cells)
+                if is_pattern:
+                    color = (130, 45, 110) if current_world == 5 else (95, 45, 125)
+                elif is_shape:
+                    color = (30, 90, 110)
+                pygame.draw.rect(screen, color, rect)
+
+                # 3D 坡道起伏引桥渲染
+                if y + 1 < maze.rows and maze.grid[y + 1][x] in (2, 3):
+                    _draw_ramp_slope(screen, rect, scale, "south")
+                elif y - 1 >= 0 and maze.grid[y - 1][x] in (2, 3):
+                    _draw_ramp_slope(screen, rect, scale, "north")
+
+                if is_pattern and rect.w >= 4 and rect.h >= 4:
+                    pygame.draw.rect(screen, (255, 120, 140) if current_world == 5 else (220, 160, 255), rect, width=1)
+                elif is_shape and rect.w >= 4 and rect.h >= 4:
+                    pygame.draw.rect(screen, (150, 240, 255), rect, width=1)
+
+            elif tile == 2:
+                # OVERPASS_NS: 南北高架桥，东西地下隧道
+                _draw_overpass_underpass(screen, rect, scale, cur_path, cur_wall)
+                if p_in_tunnel and (x, y) == (p_tx, p_ty):
+                    _draw_player_sprite(screen, camera, player, player_sprites, won, scale)
+                if w_in_tunnel and (x, y) == (w_tx, w_ty):
+                    _draw_wolf_sprite(screen, camera, wolf, wolf_sprites)
+                _draw_overpass_bridge_deck(screen, rect, scale, cur_wall)
+
+            elif tile == 3:
+                # OVERPASS_EW: 东西高架桥，南北地下隧道
+                _draw_overpass_ew_underpass(screen, rect, scale, cur_path, cur_wall)
+                if p_in_tunnel and (x, y) == (p_tx, p_ty):
+                    _draw_player_sprite(screen, camera, player, player_sprites, won, scale)
+                if w_in_tunnel and (x, y) == (w_tx, w_ty):
+                    _draw_wolf_sprite(screen, camera, wolf, wolf_sprites)
+                _draw_overpass_ew_bridge_deck(screen, rect, scale, cur_wall)
 
     # 入口与出口瓦片及图案 (起点大树、终点小房子)
     for (tx, ty), color, surf in (
@@ -1381,70 +1760,34 @@ def _draw(
                 points.append((sx, sy))
 
             if len(points) >= 2:
-                glow_w = max(3, int(scale * 8))
-                core_w = max(1, int(scale * 3))
-                pygame.draw.lines(screen, (255, 200, 50), False, points, width=glow_w)
-                pygame.draw.lines(screen, (255, 255, 220), False, points, width=core_w)
-                r_dot = max(2, int(scale * 3))
-                for px, py in points:
-                    pygame.draw.circle(screen, (255, 220, 80), (int(px), int(py)), r_dot)
+                if current_world == 5:
+                    glow_w = max(5, int(scale * 10))
+                    core_w = max(3, int(scale * 5))
+                    pygame.draw.lines(screen, (140, 15, 15), False, points, width=glow_w)
+                    pygame.draw.lines(screen, (235, 40, 40), False, points, width=core_w)
+                    r_dot = max(2, int(scale * 3.5))
+                    for px, py in points:
+                        pygame.draw.circle(screen, (235, 40, 40), (int(px), int(py)), r_dot)
+                else:
+                    glow_w = max(3, int(scale * 8))
+                    core_w = max(1, int(scale * 3))
+                    pygame.draw.lines(screen, (255, 200, 50), False, points, width=glow_w)
+                    pygame.draw.lines(screen, (255, 255, 220), False, points, width=core_w)
+                    r_dot = max(2, int(scale * 3))
+                    for px, py in points:
+                        pygame.draw.circle(screen, (255, 220, 80), (int(px), int(py)), r_dot)
 
             if auto_path_phase == "path" and points:
                 tip_x, tip_y = points[-1]
                 pygame.draw.circle(screen, (255, 255, 120), (int(tip_x), int(tip_y)), max(4, int(scale * 7)))
 
-    # 绘制玩家 (通关后一跳一跳的开心跳跃动画)
-    center_wx, center_wy = player.rect.centerx, player.rect.centery
-    draw_w = CELL_SIZE * 1.25
-    draw_h = CELL_SIZE * 1.25
-    px1, py1 = camera.world_to_screen(center_wx - draw_w / 2.0, center_wy - draw_h / 2.0)
-    px2, py2 = camera.world_to_screen(center_wx + draw_w / 2.0, center_wy + draw_h / 2.0)
-    player_draw_rect = pygame.Rect(
-        int(px1),
-        int(py1),
-        max(1, int(px2 - px1)),
-        max(1, int(py2 - py1)),
-    )
+    # 绘制玩家 (若不在地下隧道穿梭状态，在最上层绘制)
+    if not p_in_tunnel:
+        _draw_player_sprite(screen, camera, player, player_sprites, won, scale)
 
-    bounce_y = 0.0
-    if won:
-        bounce_y = abs(math.sin(pygame.time.get_ticks() * 0.012)) * (player_draw_rect.h * 0.25)
-
-    player_render_rect = pygame.Rect(
-        player_draw_rect.x,
-        int(player_draw_rect.y - bounce_y),
-        player_draw_rect.w,
-        player_draw_rect.h,
-    )
-
-    if player_render_rect.w >= 4 and player_render_rect.h >= 4:
-        facing_sprites = player_sprites.get(player.facing, player_sprites["down"])
-        cur_sprite = facing_sprites[player.anim_frame % len(facing_sprites)]
-        scaled_player = pygame.transform.smoothscale(cur_sprite, (player_render_rect.w, player_render_rect.h))
-        screen.blit(scaled_player, player_render_rect.topleft)
-    else:
-        radius = max(0, int(4 * scale))
-        pygame.draw.rect(screen, COLOR_PLAYER, player_render_rect, border_radius=radius)
-
-    # 绘制追赶的大灰狼
-    if wolf.active:
-        w_draw_w = CELL_SIZE * 1.35
-        w_draw_h = CELL_SIZE * 1.35
-        w_px1, w_py1 = camera.world_to_screen(wolf.x - w_draw_w / 2.0, wolf.y - w_draw_h / 2.0)
-        w_px2, w_py2 = camera.world_to_screen(wolf.x + w_draw_w / 2.0, wolf.y + w_draw_h / 2.0)
-        wolf_draw_rect = pygame.Rect(
-            int(w_px1),
-            int(w_py1),
-            max(1, int(w_px2 - w_px1)),
-            max(1, int(w_py2 - w_py1)),
-        )
-
-        facing_key = "cry" if wolf.crying else wolf.facing
-        w_frames = wolf_sprites.get(facing_key, wolf_sprites.get("down", []))
-        if w_frames and wolf_draw_rect.w >= 4 and wolf_draw_rect.h >= 4:
-            cur_w_sprite = w_frames[wolf.anim_frame % len(w_frames)]
-            scaled_wolf = pygame.transform.smoothscale(cur_w_sprite, (wolf_draw_rect.w, wolf_draw_rect.h))
-            screen.blit(scaled_wolf, wolf_draw_rect.topleft)
+    # 绘制追赶的大灰狼 (若不在地下隧道穿梭状态，在最上层绘制)
+    if not w_in_tunnel:
+        _draw_wolf_sprite(screen, camera, wolf, wolf_sprites)
 
     # 2. 绘制顶部 HUD 栏
     pygame.draw.rect(screen, (14, 18, 28), (0, 0, maze_w, HUD_HEIGHT))
@@ -1536,7 +1879,7 @@ def _draw_sidebar(
     pygame.draw.rect(screen, (48, 68, 98), c1_rect, width=1, border_radius=8)
 
     stage_idx = (current_world - 1) * 10 + difficulty_level
-    t_mode_str = "🌟 自由模式" if game_mode == "free" else f"🏆 闯关模式 ({stage_idx}/20关)"
+    t_mode_str = "🌟 自由模式" if game_mode == "free" else f"🏆 闯关模式 ({stage_idx}/50关)"
     t_title = f_title.render(f"模式: {t_mode_str}", True, (255, 220, 80))
     screen.blit(t_title, (pad_x + 10, cur_y + 8))
 
@@ -1562,8 +1905,23 @@ def _draw_sidebar(
     pygame.draw.rect(screen, (24, 34, 52), c2_rect, border_radius=8)
     pygame.draw.rect(screen, (48, 68, 98), c2_rect, width=1, border_radius=8)
 
-    world_title = "🏰 第二大关：狼穴地牢" if current_world == 2 else "🌲 第一大关：绿野森林"
-    t_world = f_title.render(world_title, True, (255, 130, 130) if current_world == 2 else (130, 230, 150))
+    if current_world == 5:
+        world_title = "🌉 第五大关：立交编织"
+        world_color = (120, 220, 255)
+    elif current_world == 4:
+        world_title = "🌀 第四大关：异形几何"
+        world_color = (100, 230, 220)
+    elif current_world == 3:
+        world_title = "🌟 第三大关：图案秘境"
+        world_color = (210, 140, 255)
+    elif current_world == 2:
+        world_title = "🏰 第二大关：狼穴地牢"
+        world_color = (255, 130, 130)
+    else:
+        world_title = "🌲 第一大关：绿野森林"
+        world_color = (130, 230, 150)
+
+    t_world = f_title.render(world_title, True, world_color)
     screen.blit(t_world, (pad_x + 10, cur_y + 8))
 
     base_pts = (current_world - 1) * 1000 + difficulty_level * 100
@@ -1572,7 +1930,7 @@ def _draw_sidebar(
         t_lvl = f_body.render(f"当前关卡: 第{current_world}大关 {difficulty_level}阶", True, (220, 230, 245))
         t_pts = f_small.render(f"通关: +{base_pts} 分 | 破纪录: +{rec_pts} 分", True, (160, 210, 255))
     else:
-        t_lvl = f_body.render(f"闯关进度: 第 {stage_idx} / 20 关", True, (220, 230, 245))
+        t_lvl = f_body.render(f"闯关进度: 第 {stage_idx} / 50 关", True, (220, 230, 245))
         t_pts = f_small.render(f"本阶得分: +{base_pts} 分 (破纪录加倍)", True, (160, 210, 255))
 
     screen.blit(t_lvl, (pad_x + 10, cur_y + 34))
@@ -1580,8 +1938,8 @@ def _draw_sidebar(
 
     cur_y += 100
 
-    # --- 卡片 3: 🎯 调试选关按钮 (Level Select Card) ---
-    c3_rect = pygame.Rect(pad_x, cur_y, card_w, 88)
+    # --- 卡片 3: 🎯 调试选关按钮 (Level Select Card - 50 关) ---
+    c3_rect = pygame.Rect(pad_x, cur_y, card_w, 168)
     pygame.draw.rect(screen, (24, 34, 52), c3_rect, border_radius=8)
     pygame.draw.rect(screen, (48, 68, 98), c3_rect, width=1, border_radius=8)
 
@@ -1628,7 +1986,64 @@ def _draw_sidebar(
         txt_s = f_tiny.render(str(lvl), True, (255, 240, 150) if is_active else (235, 210, 220))
         screen.blit(txt_s, txt_s.get_rect(center=brect.center))
 
-    cur_y += 96
+    # 第三大关 1~10 🌟
+    lbl_w3 = f_tiny.render("🌟W3", True, (210, 140, 255))
+    screen.blit(lbl_w3, (pad_x + 6, cur_y + 86))
+    for lvl in range(1, 11):
+        bx = pad_x + 46 + (lvl - 1) * 20
+        by = cur_y + 84
+        brect = pygame.Rect(bx, by, 18, 22)
+        sidebar_level_rects[(3, lvl)] = brect
+
+        is_active = (current_world == 3 and lvl == difficulty_level)
+        bg_c = (88, 38, 108) if is_active else (48, 22, 62)
+        border_c = (255, 220, 80) if is_active else (140, 60, 180)
+
+        pygame.draw.rect(screen, bg_c, brect, border_radius=3)
+        pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
+
+        txt_s = f_tiny.render(str(lvl), True, (255, 240, 150) if is_active else (235, 210, 250))
+        screen.blit(txt_s, txt_s.get_rect(center=brect.center))
+
+    # 第四大关 1~10 🌀
+    lbl_w4 = f_tiny.render("🌀W4", True, (100, 230, 220))
+    screen.blit(lbl_w4, (pad_x + 6, cur_y + 114))
+    for lvl in range(1, 11):
+        bx = pad_x + 46 + (lvl - 1) * 20
+        by = cur_y + 112
+        brect = pygame.Rect(bx, by, 18, 22)
+        sidebar_level_rects[(4, lvl)] = brect
+
+        is_active = (current_world == 4 and lvl == difficulty_level)
+        bg_c = (38, 98, 98) if is_active else (22, 56, 56)
+        border_c = (255, 220, 80) if is_active else (60, 160, 150)
+
+        pygame.draw.rect(screen, bg_c, brect, border_radius=3)
+        pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
+
+        txt_s = f_tiny.render(str(lvl), True, (255, 240, 150) if is_active else (210, 245, 240))
+        screen.blit(txt_s, txt_s.get_rect(center=brect.center))
+
+    # 第五大关 1~10 🌉
+    lbl_w5 = f_tiny.render("🌉W5", True, (120, 220, 255))
+    screen.blit(lbl_w5, (pad_x + 6, cur_y + 140))
+    for lvl in range(1, 11):
+        bx = pad_x + 46 + (lvl - 1) * 20
+        by = cur_y + 138
+        brect = pygame.Rect(bx, by, 18, 22)
+        sidebar_level_rects[(5, lvl)] = brect
+
+        is_active = (current_world == 5 and lvl == difficulty_level)
+        bg_c = (38, 78, 108) if is_active else (22, 44, 68)
+        border_c = (255, 220, 80) if is_active else (60, 140, 180)
+
+        pygame.draw.rect(screen, bg_c, brect, border_radius=3)
+        pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
+
+        txt_s = f_tiny.render(str(lvl), True, (255, 240, 150) if is_active else (210, 235, 250))
+        screen.blit(txt_s, txt_s.get_rect(center=brect.center))
+
+    cur_y += 178
 
     # --- 🧭 自动寻路按钮 ---
     btn_auto_rect = pygame.Rect(pad_x, cur_y, card_w, 30)
@@ -1687,7 +2102,7 @@ def _draw_sidebar(
         pygame.draw.rect(screen, (80, 180, 100), c4_rect, width=2, border_radius=8)
 
         st1 = f_banner.render("🏆 大满贯全通关！", True, (255, 255, 100))
-        st2 = f_body.render(f"1~20关总用时: {challenge_total_time:.2f} 秒", True, (220, 255, 220))
+        st2 = f_body.render(f"1~50关总用时: {challenge_total_time:.2f} 秒", True, (220, 255, 220))
         st3 = f_body.render(f"获得全通总分: +{challenge_total_score:,} 分", True, (255, 220, 100))
         st4 = f_body.render("👉 按 R 重测，按 M 返回主菜单", True, (255, 240, 180))
 
@@ -1712,8 +2127,14 @@ def _draw_sidebar(
         else:
             if current_world == 1:
                 next_str = f"第1大关 {difficulty_level + 1}阶" if difficulty_level < 10 else "第2大关 1阶"
+            elif current_world == 2:
+                next_str = f"第2大关 {difficulty_level + 1}阶" if difficulty_level < 10 else "第3大关 1阶"
+            elif current_world == 3:
+                next_str = f"第3大关 {difficulty_level + 1}阶" if difficulty_level < 10 else "第4大关 1阶"
+            elif current_world == 4:
+                next_str = f"第4大关 {difficulty_level + 1}阶" if difficulty_level < 10 else "第5大关 1阶"
             else:
-                next_str = f"第2大关 {difficulty_level + 1}阶" if difficulty_level < 10 else "第1大关 1阶"
+                next_str = f"第5大关 {difficulty_level + 1}阶" if difficulty_level < 10 else "第1大关 1阶"
             st4 = f_body.render(f"👉 按 R/空格/点击进入 {next_str}", True, (255, 240, 180))
 
         screen.blit(st1, (pad_x + 12, cur_y + 8))
@@ -1745,9 +2166,9 @@ def _draw_sidebar(
             st3 = f_body.render("避开大灰狼到达小屋", True, (190, 200, 215))
             st4 = f_body.render("按 M 键可随时返回菜单", True, (170, 180, 200))
         else:
-            st1 = f_body.render(f"🟢 闯关挑战中 ({stage_idx}/20关)", True, (120, 230, 160))
+            st1 = f_body.render(f"🟢 闯关挑战中 ({stage_idx}/50关)", True, (120, 230, 160))
             st2 = f_body.render("按 WASD / 方向键移动", True, (190, 200, 215))
-            st3 = f_body.render("顺序挑战 20 阶全部迷宫", True, (190, 200, 215))
+            st3 = f_body.render("顺序挑战 50 阶全部迷宫", True, (190, 200, 215))
             st4 = f_body.render("创造最快全通时间与高分！", True, (170, 180, 200))
 
         screen.blit(st1, (pad_x + 10, cur_y + 12))

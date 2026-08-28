@@ -9,6 +9,7 @@ var size: float = 14.0
 var facing: String = "down"
 var anim_frame: int = 0
 var is_moving: bool = false
+var overpass_layer: String = "none" # 立交桥层级: "none", "ns_bridge", "ew_tunnel"
 var _step_timer: float = 0.0
 
 signal step_taken
@@ -21,6 +22,7 @@ func init_player(start_pos: Vector2, p_size: float = 14.0) -> void:
 	facing = "down"
 	anim_frame = 0
 	is_moving = false
+	overpass_layer = "none"
 	_step_timer = 0.0
 
 func process_movement(delta: float, maze_data: MazeGenerator.MazeData, cell_size: float) -> void:
@@ -57,6 +59,28 @@ func process_movement(delta: float, maze_data: MazeGenerator.MazeData, cell_size
 	position = pixel_position
 	is_moving = moved
 
+	# 更新在 OVERPASS 瓦片上的层级状态
+	var cx = int((pixel_position.x + size * 0.5) / cell_size)
+	var cy = int((pixel_position.y + size * 0.5) / cell_size)
+	if cx >= 0 and cx < maze_data.cols and cy >= 0 and cy < maze_data.rows:
+		var tile_val = maze_data.grid[cy][cx]
+		if tile_val == MazeGenerator.OVERPASS_NS:
+			if overpass_layer == "none":
+				if facing == "up" or facing == "down":
+					overpass_layer = "ns_bridge"
+				else:
+					overpass_layer = "ew_tunnel"
+		elif tile_val == MazeGenerator.OVERPASS_EW:
+			if overpass_layer == "none":
+				if facing == "left" or facing == "right":
+					overpass_layer = "ew_bridge"
+				else:
+					overpass_layer = "ns_tunnel"
+		else:
+			overpass_layer = "none"
+	else:
+		overpass_layer = "none"
+
 	if is_moving:
 		_step_timer += delta
 		if _step_timer >= 0.18:
@@ -70,18 +94,20 @@ func process_movement(delta: float, maze_data: MazeGenerator.MazeData, cell_size
 func _move_axis(dx: float, dy: float, maze_data: MazeGenerator.MazeData, cell_size: float) -> void:
 	var trial_pos = pixel_position + Vector2(dx, dy)
 	var trial_rect = Rect2(trial_pos, Vector2(size, size))
-	if not _hits_wall(trial_rect, maze_data, cell_size):
+	var is_y_axis = (dy != 0.0)
+	if not _hits_wall(trial_rect, maze_data, cell_size, is_y_axis):
 		pixel_position = trial_pos
 
-func _hits_wall(rect: Rect2, maze_data: MazeGenerator.MazeData, cell_size: float) -> bool:
+func _hits_wall(rect: Rect2, maze_data: MazeGenerator.MazeData, cell_size: float, is_y_axis: bool = false) -> bool:
 	var left = int(rect.position.x / cell_size)
 	var right = int((rect.position.x + rect.size.x - 0.1) / cell_size)
 	var top = int(rect.position.y / cell_size)
 	var bottom = int((rect.position.y + rect.size.y - 0.1) / cell_size)
+	var p_center = pixel_position + Vector2(size * 0.5, size * 0.5)
 
 	for tile_y in range(top, bottom + 1):
 		for tile_x in range(left, right + 1):
-			if maze_data.is_wall(tile_x, tile_y):
+			if maze_data.is_wall(tile_x, tile_y, is_y_axis, p_center, cell_size, overpass_layer):
 				return true
 	return false
 

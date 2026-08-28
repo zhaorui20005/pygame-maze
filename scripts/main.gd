@@ -39,6 +39,9 @@ var audio_bgm_menu_player: AudioStreamPlayer = null
 var audio_bgm_free_player: AudioStreamPlayer = null
 var audio_bgm_challenge_player: AudioStreamPlayer = null
 var audio_bgm_dungeon_player: AudioStreamPlayer = null
+var audio_bgm_pattern_player: AudioStreamPlayer = null
+var audio_bgm_shape_player: AudioStreamPlayer = null
+var audio_bgm_woven_player: AudioStreamPlayer = null
 var current_bgm_key: String = ""
 
 # 音量设置 (0.0 ~ 1.0)
@@ -83,6 +86,7 @@ var last_round_score: int = 0
 var score_doubled: bool = false
 
 var show_auto_path: bool = false
+var regen_cooldown_msec: int = 0
 var auto_visited_order: Array[Vector2i] = []
 var auto_path: Array[Vector2i] = []
 var auto_parent_map: Dictionary = {}
@@ -189,6 +193,18 @@ func _ready() -> void:
 	audio_bgm_dungeon_player.stream = SoundGenerator.create_sound_bgm_dungeon()
 	add_child(audio_bgm_dungeon_player)
 
+	audio_bgm_pattern_player = AudioStreamPlayer.new()
+	audio_bgm_pattern_player.stream = SoundGenerator.create_sound_bgm_pattern()
+	add_child(audio_bgm_pattern_player)
+
+	audio_bgm_shape_player = AudioStreamPlayer.new()
+	audio_bgm_shape_player.stream = SoundGenerator.create_sound_bgm_shape()
+	add_child(audio_bgm_shape_player)
+
+	audio_bgm_woven_player = AudioStreamPlayer.new()
+	audio_bgm_woven_player.stream = SoundGenerator.create_sound_bgm_woven()
+	add_child(audio_bgm_woven_player)
+
 	_apply_volumes()
 	_switch_bgm("menu")
 
@@ -261,6 +277,78 @@ func _setup_sidebar_level_select_buttons() -> void:
 		grid2.add_child(btn)
 		sidebar_level_buttons[Vector2i(2, i)] = btn
 
+	var w3_lbl = Label.new()
+	w3_lbl.text = "🌟 第三大关 (图案秘境):"
+	w3_lbl.add_theme_color_override("font_color", Color(0.82, 0.55, 1.0))
+	w3_lbl.add_theme_font_size_override("font_size", 11)
+	parent_vbox.add_child(w3_lbl)
+
+	var grid3 = GridContainer.new()
+	grid3.columns = 5
+	grid3.add_theme_constant_override("h_separation", 3)
+	grid3.add_theme_constant_override("v_separation", 3)
+	parent_vbox.add_child(grid3)
+
+	for i in range(1, 11):
+		var btn = Button.new()
+		btn.text = str(i)
+		btn.custom_minimum_size = Vector2(38, 22)
+		btn.add_theme_font_size_override("font_size", 11)
+		var lvl_num = i
+		btn.pressed.connect(func():
+			_start_free_mode_at_level(3, lvl_num)
+		)
+		grid3.add_child(btn)
+		sidebar_level_buttons[Vector2i(3, i)] = btn
+
+	var w4_lbl = Label.new()
+	w4_lbl.text = "🌀 第四大关 (异形几何):"
+	w4_lbl.add_theme_color_override("font_color", Color(0.4, 0.9, 0.86))
+	w4_lbl.add_theme_font_size_override("font_size", 11)
+	parent_vbox.add_child(w4_lbl)
+
+	var grid4 = GridContainer.new()
+	grid4.columns = 5
+	grid4.add_theme_constant_override("h_separation", 3)
+	grid4.add_theme_constant_override("v_separation", 3)
+	parent_vbox.add_child(grid4)
+
+	for i in range(1, 11):
+		var btn = Button.new()
+		btn.text = str(i)
+		btn.custom_minimum_size = Vector2(38, 22)
+		btn.add_theme_font_size_override("font_size", 11)
+		var lvl_num = i
+		btn.pressed.connect(func():
+			_start_free_mode_at_level(4, lvl_num)
+		)
+		grid4.add_child(btn)
+		sidebar_level_buttons[Vector2i(4, i)] = btn
+
+	var w5_lbl = Label.new()
+	w5_lbl.text = "🌉 第五大关 (立交编织):"
+	w5_lbl.add_theme_color_override("font_color", Color(0.47, 0.86, 1.0))
+	w5_lbl.add_theme_font_size_override("font_size", 11)
+	parent_vbox.add_child(w5_lbl)
+
+	var grid5 = GridContainer.new()
+	grid5.columns = 5
+	grid5.add_theme_constant_override("h_separation", 3)
+	grid5.add_theme_constant_override("v_separation", 3)
+	parent_vbox.add_child(grid5)
+
+	for i in range(1, 11):
+		var btn = Button.new()
+		btn.text = str(i)
+		btn.custom_minimum_size = Vector2(38, 22)
+		btn.add_theme_font_size_override("font_size", 11)
+		var lvl_num = i
+		btn.pressed.connect(func():
+			_start_free_mode_at_level(5, lvl_num)
+		)
+		grid5.add_child(btn)
+		sidebar_level_buttons[Vector2i(5, i)] = btn
+
 	var btn_auto = Button.new()
 	btn_auto.text = "🧭 自动寻路：已关闭 [点击演示]"
 	btn_auto.custom_minimum_size = Vector2(210, 26)
@@ -313,6 +401,9 @@ func _switch_bgm(key: String) -> void:
 	if audio_bgm_free_player != null: audio_bgm_free_player.stop()
 	if audio_bgm_challenge_player != null: audio_bgm_challenge_player.stop()
 	if audio_bgm_dungeon_player != null: audio_bgm_dungeon_player.stop()
+	if audio_bgm_pattern_player != null: audio_bgm_pattern_player.stop()
+	if audio_bgm_shape_player != null: audio_bgm_shape_player.stop()
+	if audio_bgm_woven_player != null: audio_bgm_woven_player.stop()
 
 	current_bgm_key = key
 	var target_player: AudioStreamPlayer = null
@@ -320,6 +411,9 @@ func _switch_bgm(key: String) -> void:
 	elif key == "free": target_player = audio_bgm_free_player
 	elif key == "challenge": target_player = audio_bgm_challenge_player
 	elif key == "dungeon": target_player = audio_bgm_dungeon_player
+	elif key == "pattern": target_player = audio_bgm_pattern_player
+	elif key == "shape": target_player = audio_bgm_shape_player
+	elif key == "woven": target_player = audio_bgm_woven_player
 
 	if target_player != null:
 		target_player.volume_db = _lin_to_db(vol_bgm)
@@ -336,9 +430,17 @@ func _apply_volumes() -> void:
 	if audio_bgm_free_player != null: audio_bgm_free_player.volume_db = db_bgm
 	if audio_bgm_challenge_player != null: audio_bgm_challenge_player.volume_db = db_bgm
 	if audio_bgm_dungeon_player != null: audio_bgm_dungeon_player.volume_db = db_bgm
+	if audio_bgm_pattern_player != null: audio_bgm_pattern_player.volume_db = db_bgm
+	if audio_bgm_shape_player != null: audio_bgm_shape_player.volume_db = db_bgm
+	if audio_bgm_woven_player != null: audio_bgm_woven_player.volume_db = db_bgm
 
 func _start_new_game(world: int = 1, level: int = 1) -> void:
-	current_world = clampi(world, 1, 2)
+	var now_msec = Time.get_ticks_msec()
+	if now_msec - regen_cooldown_msec < 350:
+		return
+	regen_cooldown_msec = now_msec
+
+	current_world = clampi(world, 1, 5)
 	difficulty_level = clampi(level, 1, 10)
 	won = false
 	auto_advance_timer = -1.0
@@ -350,7 +452,13 @@ func _start_new_game(world: int = 1, level: int = 1) -> void:
 	start_time_msec = 0
 	current_time_sec = 0.0
 
-	if current_world == 2:
+	if current_world == 5:
+		_switch_bgm("woven")
+	elif current_world == 4:
+		_switch_bgm("shape")
+	elif current_world == 3:
+		_switch_bgm("pattern")
+	elif current_world == 2:
 		_switch_bgm("dungeon")
 	elif game_mode == "challenge":
 		_switch_bgm("challenge")
@@ -465,6 +573,30 @@ func _advance_next_level() -> void:
 				difficulty_level += 1
 				_start_new_game(current_world, difficulty_level)
 			else:
+				current_world = 3
+				difficulty_level = 1
+				_start_new_game(current_world, difficulty_level)
+		elif current_world == 3:
+			if difficulty_level < 10:
+				difficulty_level += 1
+				_start_new_game(current_world, difficulty_level)
+			else:
+				current_world = 4
+				difficulty_level = 1
+				_start_new_game(current_world, difficulty_level)
+		elif current_world == 4:
+			if difficulty_level < 10:
+				difficulty_level += 1
+				_start_new_game(current_world, difficulty_level)
+			else:
+				current_world = 5
+				difficulty_level = 1
+				_start_new_game(current_world, difficulty_level)
+		elif current_world == 5:
+			if difficulty_level < 10:
+				difficulty_level += 1
+				_start_new_game(current_world, difficulty_level)
+			else:
 				_start_challenge_mode()
 	else:
 		if difficulty_level < 10:
@@ -472,6 +604,15 @@ func _advance_next_level() -> void:
 		else:
 			if current_world == 1:
 				current_world = 2
+				difficulty_level = 1
+			elif current_world == 2:
+				current_world = 3
+				difficulty_level = 1
+			elif current_world == 3:
+				current_world = 4
+				difficulty_level = 1
+			elif current_world == 4:
+				current_world = 5
 				difficulty_level = 1
 			else:
 				current_world = 1
@@ -482,11 +623,20 @@ func _prev_level() -> void:
 	if difficulty_level > 1:
 		difficulty_level -= 1
 	else:
-		if current_world == 2:
+		if current_world == 5:
+			current_world = 4
+			difficulty_level = 10
+		elif current_world == 4:
+			current_world = 3
+			difficulty_level = 10
+		elif current_world == 3:
+			current_world = 2
+			difficulty_level = 10
+		elif current_world == 2:
 			current_world = 1
 			difficulty_level = 10
 		else:
-			current_world = 2
+			current_world = 5
 			difficulty_level = 10
 	_start_new_game(current_world, difficulty_level)
 
@@ -503,21 +653,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	var win_size = get_viewport_rect().size
 	var cx = win_size.x / 2.0
 	var cy = win_size.y / 2.0
-	var btn_free_rect = Rect2(cx - 260, cy - 188, 520, 58)
-	var btn_chal_rect = Rect2(cx - 260, cy - 122, 520, 58)
+	var btn_free_rect = Rect2(cx - 290, cy - 202, 580, 50)
+	var btn_chal_rect = Rect2(cx - 290, cy - 146, 580, 50)
 
-	var sound_card_y = cy + 24
-	var walk_minus = Rect2(cx - 260 + 120, sound_card_y + 30, 28, 22)
-	var walk_plus = Rect2(cx - 260 + 348, sound_card_y + 30, 28, 22)
-	var walk_track = Rect2(cx - 260 + 158, sound_card_y + 37, 180, 8)
+	var sound_card_y = cy + 84
+	var walk_minus = Rect2(cx - 290 + 120, sound_card_y + 26, 28, 22)
+	var walk_plus = Rect2(cx - 290 + 388, sound_card_y + 26, 28, 22)
+	var walk_track = Rect2(cx - 290 + 158, sound_card_y + 33, 220, 8)
 
-	var sfx_minus = Rect2(cx - 260 + 120, sound_card_y + 56, 28, 22)
-	var sfx_plus = Rect2(cx - 260 + 348, sound_card_y + 56, 28, 22)
-	var sfx_track = Rect2(cx - 260 + 158, sound_card_y + 63, 180, 8)
+	var sfx_minus = Rect2(cx - 290 + 120, sound_card_y + 51, 28, 22)
+	var sfx_plus = Rect2(cx - 290 + 388, sound_card_y + 51, 28, 22)
+	var sfx_track = Rect2(cx - 290 + 158, sound_card_y + 58, 220, 8)
 
-	var bgm_minus = Rect2(cx - 260 + 120, sound_card_y + 82, 28, 22)
-	var bgm_plus = Rect2(cx - 260 + 348, sound_card_y + 82, 28, 22)
-	var bgm_track = Rect2(cx - 260 + 158, sound_card_y + 89, 180, 8)
+	var bgm_minus = Rect2(cx - 290 + 120, sound_card_y + 76, 28, 22)
+	var bgm_plus = Rect2(cx - 290 + 388, sound_card_y + 76, 28, 22)
+	var bgm_track = Rect2(cx - 290 + 158, sound_card_y + 83, 220, 8)
 
 	if in_menu:
 		if event is InputEventKey and event.pressed:
@@ -530,13 +680,26 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event is InputEventMouseButton:
 			if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 				for i in range(1, 11):
-					var b1 = Rect2(cx - 260 + 160 + (i - 1) * 35, cy - 56 + 6, 32, 22)
+					var bx = cx - 290 + 190 + (i - 1) * 37
+					var b1 = Rect2(bx, cy - 90 + 6, 33, 24)
 					if b1.has_point(event.position):
 						_start_free_mode_at_level(1, i)
 						return
-					var b2 = Rect2(cx - 260 + 160 + (i - 1) * 35, cy - 56 + 40, 32, 22)
+					var b2 = Rect2(bx, cy - 90 + 37, 33, 24)
 					if b2.has_point(event.position):
 						_start_free_mode_at_level(2, i)
+						return
+					var b3 = Rect2(bx, cy - 90 + 68, 33, 24)
+					if b3.has_point(event.position):
+						_start_free_mode_at_level(3, i)
+						return
+					var b4 = Rect2(bx, cy - 90 + 99, 33, 24)
+					if b4.has_point(event.position):
+						_start_free_mode_at_level(4, i)
+						return
+					var b5 = Rect2(bx, cy - 90 + 130, 33, 24)
+					if b5.has_point(event.position):
+						_start_free_mode_at_level(5, i)
 						return
 				if btn_free_rect.has_point(event.position):
 					_start_free_mode_at_level(1, 1)
@@ -830,7 +993,7 @@ func _physics_process(delta: float) -> void:
 			elif game_mode == "challenge":
 				challenge_total_time += current_time_sec
 				challenge_total_score += last_round_score
-				if current_world == 2 and difficulty_level == 10:
+				if current_world == 5 and difficulty_level == 10:
 					challenge_completed = true
 					total_score += challenge_total_score
 					if challenge_best_time < 0.0 or challenge_total_time < challenge_best_time:
@@ -892,11 +1055,11 @@ func _update_hud() -> void:
 
 	var stage_idx = (current_world - 1) * 10 + difficulty_level
 	if level_label != null:
-		var world_tag = "🏰 狼穴地牢" if current_world == 2 else "🌲 绿野森林"
+		var world_tag = "🌉 立交编织" if current_world == 5 else ("🌀 异形几何" if current_world == 4 else ("🌟 图案秘境" if current_world == 3 else ("🏰 狼穴地牢" if current_world == 2 else "🌲 绿野森林")))
 		if game_mode == "free":
 			level_label.text = "%s (第%d大关 %d阶)" % [world_tag, current_world, difficulty_level]
 		else:
-			level_label.text = "%s (第%d/20关)" % [world_tag, stage_idx]
+			level_label.text = "%s (第%d/50关)" % [world_tag, stage_idx]
 
 	if points_info_label != null:
 		var base_pts = (current_world - 1) * 1000 + difficulty_level * 100
@@ -929,9 +1092,9 @@ func _update_hud() -> void:
 
 	if status_label != null:
 		if game_mode == "challenge" and challenge_completed:
-			status_label.text = "🏆 大满贯全通关！\n1~20关总用时: %.2f 秒\n获得全通总分: +%d 分\n👉 按 R 重测，按 M 返回主菜单" % [challenge_total_time, challenge_total_score]
+			status_label.text = "🏆 大满贯全通关！\n1~50关总用时: %.2f 秒\n获得全通总分: +%d 分\n👉 按 R 重测，按 M 返回主菜单" % [challenge_total_time, challenge_total_score]
 		elif won:
-			var next_str = "第%d大关 %d阶" % [current_world, difficulty_level + 1] if difficulty_level < 10 else ("第2大关 1阶" if current_world == 1 else "第1大关 1阶")
+			var next_str = "第%d大关 %d阶" % [current_world, difficulty_level + 1] if difficulty_level < 10 else ("第2大关 1阶" if current_world == 1 else ("第3大关 1阶" if current_world == 2 else ("第4大关 1阶" if current_world == 3 else ("第5大关 1阶" if current_world == 4 else "第1大关 1阶"))))
 			if auto_advance_timer > 0.0:
 				status_label.text = "🎉 成功通关！ 获得积分: +%d 分\n👉 %.1fs后自动进入 %s (按空格/点击加速)" % [last_round_score, auto_advance_timer, next_str]
 			else:
@@ -942,7 +1105,7 @@ func _update_hud() -> void:
 			if game_mode == "free":
 				status_label.text = "🟢 正在自由模式练习...\n避开大灰狼到达小屋\n按 M 键可随时返回主菜单"
 			else:
-				status_label.text = "🟢 闯关挑战中 (%d/20关)\n顺序挑战 20 阶全部迷宫\n创造最快全通时间与最高分！" % stage_idx
+				status_label.text = "🟢 闯关挑战中 (%d/50关)\n顺序挑战 50 阶全部迷宫\n创造最快全通时间与最高分！" % stage_idx
 
 func _load_best_records() -> void:
 	var path = "user://best_records.json"
@@ -999,7 +1162,19 @@ func _draw() -> void:
 	var cur_bg = COLOR_BG
 	var cur_wall = COLOR_WALL
 	var cur_path = COLOR_PATH
-	if current_world == 2:
+	if current_world == 5:
+		cur_bg = Color(0.05, 0.06, 0.11)
+		cur_wall = Color(0.14, 0.18, 0.25)
+		cur_path = Color(0.10, 0.35, 0.43)
+	elif current_world == 4:
+		cur_bg = Color(0.04, 0.09, 0.13)
+		cur_wall = Color(0.10, 0.29, 0.37)
+		cur_path = Color(0.14, 0.47, 0.43)
+	elif current_world == 3:
+		cur_bg = Color(0.07, 0.05, 0.13)
+		cur_wall = Color(0.18, 0.12, 0.27)
+		cur_path = Color(0.12, 0.31, 0.43)
+	elif current_world == 2:
 		cur_bg = Color(0.08, 0.04, 0.06)
 		cur_wall = Color(0.16, 0.08, 0.12)
 		cur_path = Color(0.30, 0.12, 0.16)
@@ -1018,14 +1193,67 @@ func _draw() -> void:
 	var min_tile_y = max(0, int(min_wy / CELL_SIZE))
 	var max_tile_y = min(maze_data.rows - 1, int(max_wy / CELL_SIZE))
 
+	# 判断 Player 与 Wolf 是否处于东西或南北地下隧道穿梭状态 (在桥下方)
+	var p_center = player.pixel_position + Vector2(player.size / 2.0, player.size / 2.0) if player != null else Vector2.ZERO
+	var p_tx = int(p_center.x / CELL_SIZE)
+	var p_ty = int(p_center.y / CELL_SIZE)
+	var p_in_tunnel = false
+	if player != null and p_tx >= 0 and p_tx < maze_data.cols and p_ty >= 0 and p_ty < maze_data.rows:
+		var cur_t = maze_data.grid[p_ty][p_tx]
+		if cur_t == MazeGenerator.OVERPASS_NS and player.overpass_layer == "ew_tunnel":
+			p_in_tunnel = true
+		elif cur_t == MazeGenerator.OVERPASS_EW and player.overpass_layer == "ns_tunnel":
+			p_in_tunnel = true
+
+	var w_tx = int(wolf_pos.x / CELL_SIZE) if wolf_active else -1
+	var w_ty = int(wolf_pos.y / CELL_SIZE) if wolf_active else -1
+	var w_in_tunnel = false
+
 	for y in range(min_tile_y, max_tile_y + 1):
 		for x in range(min_tile_x, max_tile_x + 1):
 			var tile = maze_data.grid[y][x]
 			var p1 = offset_pos + Vector2(x * CELL_SIZE, y * CELL_SIZE) * camera_scale
 			var p2 = offset_pos + Vector2((x + 1) * CELL_SIZE, (y + 1) * CELL_SIZE) * camera_scale
 			var rect = Rect2(p1, p2 - p1)
-			var color = cur_wall if tile == MazeGenerator.WALL else cur_path
-			draw_rect(rect, color)
+
+			if tile == MazeGenerator.WALL:
+				draw_rect(rect, cur_wall)
+			elif tile == MazeGenerator.PATH:
+				var color = cur_path
+				var is_pat = (maze_data.pattern_cells.has(Vector2i(x, y)))
+				var is_shp = (current_world == 4 and maze_data.shape_cells.has(Vector2i(x, y)))
+				if is_pat:
+					color = Color(0.51, 0.18, 0.43) if current_world == 5 else Color(0.37, 0.18, 0.49)
+				elif is_shp:
+					color = Color(0.12, 0.35, 0.43)
+				draw_rect(rect, color)
+
+				# 3D 坡道起伏引桥渲染
+				if y + 1 < maze_data.rows and (maze_data.grid[y + 1][x] == MazeGenerator.OVERPASS_NS or maze_data.grid[y + 1][x] == MazeGenerator.OVERPASS_EW):
+					_draw_ramp_slope(rect, camera_scale, "south")
+				elif y - 1 >= 0 and (maze_data.grid[y - 1][x] == MazeGenerator.OVERPASS_NS or maze_data.grid[y - 1][x] == MazeGenerator.OVERPASS_EW):
+					_draw_ramp_slope(rect, camera_scale, "north")
+
+				if is_pat and rect.size.x >= 4.0:
+					draw_rect(rect, Color(0.86, 0.63, 1.0), false, 1.0)
+				elif is_shp and rect.size.x >= 4.0:
+					draw_rect(rect, Color(0.58, 0.94, 1.0), false, 1.0)
+
+			elif tile == MazeGenerator.OVERPASS_NS:
+				_draw_overpass_underpass(rect, camera_scale, cur_path, cur_wall)
+				if p_in_tunnel and x == p_tx and y == p_ty:
+					_draw_player()
+				if w_in_tunnel and x == w_tx and y == w_ty:
+					_draw_wolf()
+				_draw_overpass_bridge_deck(rect, camera_scale, cur_wall)
+
+			elif tile == MazeGenerator.OVERPASS_EW:
+				_draw_overpass_ew_underpass(rect, camera_scale, cur_path, cur_wall)
+				if p_in_tunnel and x == p_tx and y == p_ty:
+					_draw_player()
+				if w_in_tunnel and x == w_tx and y == w_ty:
+					_draw_wolf()
+				_draw_overpass_ew_bridge_deck(rect, camera_scale, cur_wall)
 
 	# 入口与出口绘制 (起点大树，终点小房子)
 	_draw_tile_marker(maze_data.entrance, COLOR_ENTRANCE, "tree")
@@ -1085,21 +1313,32 @@ func _draw() -> void:
 				pts.append(screen_p)
 
 			if pts.size() >= 2:
-				var glow_w = max(3.0, camera_scale * 8.0)
-				var core_w = max(1.0, camera_scale * 3.0)
-				draw_polyline(pts, Color(1.0, 0.78, 0.20, 0.9), glow_w)
-				draw_polyline(pts, Color(1.0, 1.0, 0.85, 1.0), core_w)
-				var r_dot = max(2.0, camera_scale * 3.0)
-				for p in pts:
-					draw_circle(p, r_dot, Color(1.0, 0.88, 0.35))
+				if current_world == 5:
+					var glow_w = maxf(5.0, camera_scale * 10.0)
+					var core_w = maxf(3.0, camera_scale * 5.0)
+					draw_polyline(pts, Color(0.55, 0.06, 0.06, 1.0), glow_w)
+					draw_polyline(pts, Color(0.90, 0.16, 0.16, 1.0), core_w)
+					var r_dot = maxf(2.0, camera_scale * 3.5)
+					for p in pts:
+						draw_circle(p, r_dot, Color(0.90, 0.16, 0.16))
+				else:
+					var glow_w = max(3.0, camera_scale * 8.0)
+					var core_w = max(1.0, camera_scale * 3.0)
+					draw_polyline(pts, Color(1.0, 0.78, 0.20, 0.9), glow_w)
+					draw_polyline(pts, Color(1.0, 1.0, 0.85, 1.0), core_w)
+					var r_dot = max(2.0, camera_scale * 3.0)
+					for p in pts:
+						draw_circle(p, r_dot, Color(1.0, 0.88, 0.35))
 
 			if auto_path_phase == "path" and pts.size() > 0:
 				var tip_p = pts[-1]
 				draw_circle(tip_p, max(4.0, camera_scale * 7.0), Color(1.0, 1.0, 0.47))
 
-	# 绘制萌系 Q 版小人与大灰狼
-	_draw_player()
-	_draw_wolf()
+	# 绘制萌系 Q 版小人与大灰狼 (若不在地下隧道穿梭状态，在最上层绘制)
+	if not p_in_tunnel:
+		_draw_player()
+	if not w_in_tunnel:
+		_draw_wolf()
 
 	# HUD 顶栏背景
 	draw_rect(Rect2(0, 0, maze_w, HUD_HEIGHT), COLOR_HUD_BG)
@@ -1114,53 +1353,88 @@ func _draw_main_menu(win_size: Vector2) -> void:
 		return
 
 	# 1. 标题与副标题
-	draw_string(font_default, Vector2(cx - 180, cy - 235), "🎮 小红帽迷宫大冒险", HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(1, 0.88, 0.35))
-	draw_string(font_default, Vector2(cx - 180, cy - 198), "—— 请选择游戏模式 & 调整声音设置 ——", HORIZONTAL_ALIGNMENT_CENTER, -1, 16, Color(0.67, 0.75, 0.85))
+	draw_string(font_default, Vector2(cx - 180, cy - 255), "🎮 小红帽迷宫大冒险", HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(1, 0.88, 0.35))
+	draw_string(font_default, Vector2(cx - 180, cy - 222), "—— 请选择游戏模式 & 调整声音设置 ——", HORIZONTAL_ALIGNMENT_CENTER, -1, 16, Color(0.67, 0.75, 0.85))
+
+	var card_w = 580.0
 
 	# 2. 模式 1：自由模式 (Free Mode)
-	var btn1_rect = Rect2(cx - 260, cy - 188, 520, 58)
+	var btn1_rect = Rect2(cx - card_w / 2.0, cy - 202, card_w, 50)
 	draw_rect(btn1_rect, Color(0.09, 0.13, 0.20))
 	draw_rect(btn1_rect, Color(0.39, 0.70, 1.0), false, 1.5)
 
-	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 24), "🌟 1. 自由模式 (Free Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1, 0.94, 0.6))
-	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 46), "按 [1] 键或点击 | 1~10 阶自由切换，无限切关与随心练习", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
+	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 22), "🌟 1. 自由模式 (Free Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.94, 0.6))
+	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 42), "按 [1] 键或点击 | 1~10 阶自由切换，无限切关与随心练习", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
 
 	# 3. 模式 2：闯关模式 (Challenge Mode)
-	var btn2_rect = Rect2(cx - 260, cy - 122, 520, 58)
+	var btn2_rect = Rect2(cx - card_w / 2.0, cy - 146, card_w, 50)
 	draw_rect(btn2_rect, Color(0.09, 0.13, 0.20))
 	draw_rect(btn2_rect, Color(1.0, 0.82, 0.35), false, 1.5)
 
-	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 24), "🏆 2. 闯关模式 (Challenge Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1, 0.86, 0.35))
-	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 46), "按 [2] 键或点击 | 从 1 阶连续闯关至 10 阶，结算总用时与得分", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
+	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 22), "🏆 2. 闯关模式 (Challenge Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.86, 0.35))
+	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 42), "按 [2] 键或点击 | 森林 + 地牢 + 秘境 + 异形 + 立交 共 50 关连续大满贯", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
 
-	# 4. 调试/自由选关卡片
-	var lvl_card = Rect2(cx - 260, cy - 56, 520, 72)
+	# 4. 调试/自由选关卡片 (五大关 50 阶)
+	var lvl_card = Rect2(cx - card_w / 2.0, cy - 90, card_w, 166)
 	draw_rect(lvl_card, Color(0.09, 0.13, 0.20))
 	draw_rect(lvl_card, Color(0.24, 0.35, 0.55), false, 1.0)
-	draw_string(font_default, Vector2(lvl_card.position.x + 16, lvl_card.position.y + 20), "🌲 第一大关 (绿野森林):", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.5, 0.9, 0.6))
+
+	# 第一大关
+	draw_string(font_default, Vector2(lvl_card.position.x + 16, lvl_card.position.y + 22), "🌲 第一大关 (绿野森林):", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.5, 0.9, 0.6))
 	for i in range(1, 11):
-		var bx = lvl_card.position.x + 160 + (i - 1) * 35
+		var bx = lvl_card.position.x + 190 + (i - 1) * 37
 		var by = lvl_card.position.y + 6
-		var brect = Rect2(bx, by, 32, 22)
+		var brect = Rect2(bx, by, 33, 24)
 		draw_rect(brect, Color(0.11, 0.27, 0.18))
 		draw_rect(brect, Color(0.39, 0.82, 0.51), false, 1.0)
-		draw_string(font_default, Vector2(bx + 10, by + 16), str(i), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1))
+		draw_string(font_default, Vector2(bx + 11, by + 16), str(i), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1))
 
-	draw_string(font_default, Vector2(lvl_card.position.x + 16, lvl_card.position.y + 54), "🏰 第二大关 (狼穴地牢):", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.5, 0.5))
+	# 第二大关
+	draw_string(font_default, Vector2(lvl_card.position.x + 16, lvl_card.position.y + 53), "🏰 第二大关 (狼穴地牢):", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.5, 0.5))
 	for i in range(1, 11):
-		var bx = lvl_card.position.x + 160 + (i - 1) * 35
-		var by = lvl_card.position.y + 40
-		var brect = Rect2(bx, by, 32, 22)
+		var bx = lvl_card.position.x + 190 + (i - 1) * 37
+		var by = lvl_card.position.y + 37
+		var brect = Rect2(bx, by, 33, 24)
 		draw_rect(brect, Color(0.33, 0.11, 0.17))
 		draw_rect(brect, Color(1.0, 0.43, 0.51), false, 1.0)
-		draw_string(font_default, Vector2(bx + 10, by + 16), str(i), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1))
+		draw_string(font_default, Vector2(bx + 11, by + 16), str(i), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1))
+
+	# 第三大关
+	draw_string(font_default, Vector2(lvl_card.position.x + 16, lvl_card.position.y + 84), "🌟 第三大关 (图案秘境):", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.82, 0.55, 1.0))
+	for i in range(1, 11):
+		var bx = lvl_card.position.x + 190 + (i - 1) * 37
+		var by = lvl_card.position.y + 68
+		var brect = Rect2(bx, by, 33, 24)
+		draw_rect(brect, Color(0.28, 0.11, 0.37))
+		draw_rect(brect, Color(0.82, 0.55, 1.0), false, 1.0)
+		draw_string(font_default, Vector2(bx + 11, by + 16), str(i), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1))
+
+	# 第四大关
+	draw_string(font_default, Vector2(lvl_card.position.x + 16, lvl_card.position.y + 115), "🌀 第四大关 (异形几何):", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.39, 0.90, 0.86))
+	for i in range(1, 11):
+		var bx = lvl_card.position.x + 190 + (i - 1) * 37
+		var by = lvl_card.position.y + 99
+		var brect = Rect2(bx, by, 33, 24)
+		draw_rect(brect, Color(0.11, 0.31, 0.31))
+		draw_rect(brect, Color(0.39, 0.90, 0.86), false, 1.0)
+		draw_string(font_default, Vector2(bx + 11, by + 16), str(i), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1))
+
+	# 第五大关
+	draw_string(font_default, Vector2(lvl_card.position.x + 16, lvl_card.position.y + 146), "🌉 第五大关 (立交编织):", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.47, 0.86, 1.0))
+	for i in range(1, 11):
+		var bx = lvl_card.position.x + 190 + (i - 1) * 37
+		var by = lvl_card.position.y + 130
+		var brect = Rect2(bx, by, 33, 24)
+		draw_rect(brect, Color(0.11, 0.25, 0.38))
+		draw_rect(brect, Color(0.47, 0.86, 1.0), false, 1.0)
+		draw_string(font_default, Vector2(bx + 11, by + 16), str(i), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1))
 
 	# 5. 卡片 4：🎵 声音大小设置 (Sound Settings)
-	var sound_card = Rect2(cx - 260, cy + 24, 520, 115)
+	var sound_card = Rect2(cx - card_w / 2.0, cy + 84, card_w, 110)
 	draw_rect(sound_card, Color(0.09, 0.13, 0.20))
 	draw_rect(sound_card, Color(0.24, 0.35, 0.55), false, 1.0)
 
-	draw_string(font_default, Vector2(sound_card.position.x + 16, sound_card.position.y + 22), "🎵 声音大小设置", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 0.86, 0.35))
+	draw_string(font_default, Vector2(sound_card.position.x + 16, sound_card.position.y + 20), "🎵 声音大小设置", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 0.86, 0.35))
 
 	var _draw_vol_row = func(label: String, y_pos: float, vol: float):
 		draw_string(font_default, Vector2(sound_card.position.x + 16, y_pos + 15), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.86, 0.90, 0.96))
@@ -1170,26 +1444,26 @@ func _draw_main_menu(win_size: Vector2) -> void:
 		draw_rect(bm, Color(0.39, 0.55, 0.75), false, 1.0)
 		draw_string(font_default, Vector2(bm.position.x + 10, bm.position.y + 16), "-", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1))
 
-		var track = Rect2(sound_card.position.x + 158, y_pos + 7, 180, 8)
+		var track = Rect2(sound_card.position.x + 158, y_pos + 7, 220, 8)
 		draw_rect(track, Color(0.16, 0.20, 0.29))
 		var fill_w = vol * track.size.x
 		if fill_w > 0:
 			draw_rect(Rect2(track.position, Vector2(fill_w, track.size.y)), Color(0.39, 0.75, 1.0))
 		draw_circle(Vector2(track.position.x + fill_w, track.position.y + 4), 6.0, Color(1.0, 0.92, 0.55))
 
-		var bp = Rect2(sound_card.position.x + 348, y_pos, 28, 22)
+		var bp = Rect2(sound_card.position.x + 388, y_pos, 28, 22)
 		draw_rect(bp, Color(0.18, 0.26, 0.38))
 		draw_rect(bp, Color(0.39, 0.55, 0.75), false, 1.0)
 		draw_string(font_default, Vector2(bp.position.x + 8, bp.position.y + 16), "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1))
 
-		draw_string(font_default, Vector2(sound_card.position.x + 388, y_pos + 16), "%d%%" % int(round(vol * 100.0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1.0, 0.92, 0.59))
+		draw_string(font_default, Vector2(sound_card.position.x + 428, y_pos + 16), "%d%%" % int(round(vol * 100.0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1.0, 0.92, 0.59))
 
-	_draw_vol_row.call("🚶 走路音效", sound_card.position.y + 30, vol_walk)
-	_draw_vol_row.call("🔔 提示音效", sound_card.position.y + 56, vol_sfx)
-	_draw_vol_row.call("🎵 背景音乐", sound_card.position.y + 82, vol_bgm)
+	_draw_vol_row.call("🚶 走路音效", sound_card.position.y + 26, vol_walk)
+	_draw_vol_row.call("🔔 提示音效", sound_card.position.y + 51, vol_sfx)
+	_draw_vol_row.call("🎵 背景音乐", sound_card.position.y + 76, vol_bgm)
 
 	# 6. 排行榜纪录卡片
-	var card_rect = Rect2(cx - 260, cy + 147, 520, 68)
+	var card_rect = Rect2(cx - card_w / 2.0, cy + 202, card_w, 66)
 	draw_rect(card_rect, Color(0.07, 0.10, 0.16))
 	draw_rect(card_rect, Color(0.16, 0.23, 0.35), false, 1.0)
 
@@ -1200,7 +1474,7 @@ func _draw_main_menu(win_size: Vector2) -> void:
 	var c_score_str = "%d 分" % challenge_best_score if challenge_best_score > 0 else "暂无纪录"
 	draw_string(font_default, Vector2(card_rect.position.x + 16, card_rect.position.y + 58), "闯关模式最佳全通: %s | 最高得分: %s" % [c_time_str, c_score_str], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.71, 0.82, 1.0))
 
-	# 6. 提示
+	# 7. 提示
 	draw_string(font_default, Vector2(cx - 210, win_size.y - 22), "👉 点击模式或调音按钮 | 按 [1]/[2] 启动模式 | 按 [ESC] 退出程序", HORIZONTAL_ALIGNMENT_CENTER, -1, 13, Color(0.51, 0.59, 0.69))
 
 func _draw_tile_marker(tile: Vector2i, color: Color, type: String) -> void:
@@ -1224,6 +1498,89 @@ func _draw_tile_marker(tile: Vector2i, color: Color, type: String) -> void:
 			_draw_mini_tree(rect)
 		elif type == "flag":
 			_draw_mini_flag(rect)
+
+func _draw_ramp_slope(rect: Rect2, scale: float, direction: String) -> void:
+	if rect.size.x < 6.0 or rect.size.y < 6.0:
+		return
+	var bw = maxf(4.0, rect.size.x * 0.68)
+	var bx = rect.position.x + (rect.size.x - bw) / 2.0
+	var h_steps = int(rect.size.y)
+	for i in range(h_steps):
+		var factor = float(i) / maxf(1.0, float(h_steps)) if direction == "south" else float(h_steps - 1 - i) / maxf(1.0, float(h_steps))
+		var r = 0.10 + factor * 0.15
+		var g = 0.35 + factor * 0.22
+		var b = 0.43 + factor * 0.30
+		draw_line(Vector2(bx, rect.position.y + i), Vector2(bx + bw, rect.position.y + i), Color(r, g, b), 1.0)
+	var rail_w = maxf(1.0, scale * 1.5)
+	draw_line(Vector2(bx, rect.position.y), Vector2(bx, rect.position.y + rect.size.y), Color(0.39, 0.78, 0.94), rail_w)
+	draw_line(Vector2(bx + bw, rect.position.y), Vector2(bx + bw, rect.position.y + rect.size.y), Color(0.39, 0.78, 0.94), rail_w)
+
+func _draw_overpass_underpass(rect: Rect2, scale: float, cur_path: Color, cur_wall: Color) -> void:
+	# 1. 地下隧道底色
+	var tunnel_bg = Color(maxf(0.0, cur_path.r - 0.04), maxf(0.0, cur_path.g - 0.08), maxf(0.0, cur_path.b - 0.10))
+	draw_rect(rect, tunnel_bg)
+
+	# 2. 上下洞口混凝土墙线
+	var line_w = maxf(1.0, scale * 1.5)
+	draw_line(rect.position, Vector2(rect.position.x + rect.size.x, rect.position.y), cur_wall, line_w)
+	draw_line(Vector2(rect.position.x, rect.position.y + rect.size.y - 1.0), rect.position + rect.size, cur_wall, line_w)
+
+	# 3. 隧道内部暗光阴影
+	draw_rect(rect, Color(0.01, 0.02, 0.05, 0.40))
+
+func _draw_overpass_bridge_deck(rect: Rect2, scale: float, cur_wall: Color) -> void:
+	var bw = maxf(4.0, rect.size.x * 0.70)
+	var bx = rect.position.x + (rect.size.x - bw) / 2.0
+
+	# 1. 3D 投射阴影
+	var shadow_off_x = maxf(2.0, scale * 3.5)
+	var shadow_off_y = maxf(1.0, scale * 2.0)
+	var shadow_rect = Rect2(Vector2(bx + shadow_off_x, rect.position.y + shadow_off_y), Vector2(bw, rect.size.y))
+	draw_rect(shadow_rect, Color(0.01, 0.02, 0.05, 0.55))
+
+	# 2. 南北高架桥纯净路面
+	var bridge_deck = Rect2(Vector2(bx, rect.position.y), Vector2(bw, rect.size.y))
+	draw_rect(bridge_deck, Color(0.96, 0.97, 1.0))
+
+	# 3. 左右 3D 黑色桥壁框线
+	var line_w = maxf(1.0, scale * 1.5)
+	draw_line(Vector2(bx, rect.position.y), Vector2(bx, rect.position.y + rect.size.y), cur_wall, line_w)
+	draw_line(Vector2(bx + bw - 1.0, rect.position.y), Vector2(bx + bw - 1.0, rect.position.y + rect.size.y), cur_wall, line_w)
+
+	# 4. 桥内两侧红线护栏
+	if rect.size.x >= 8.0:
+		draw_line(Vector2(bx + 2.0, rect.position.y), Vector2(bx + 2.0, rect.position.y + rect.size.y), Color(0.86, 0.16, 0.16), 1.0)
+		draw_line(Vector2(bx + bw - 3.0, rect.position.y), Vector2(bx + bw - 3.0, rect.position.y + rect.size.y), Color(0.86, 0.16, 0.16), 1.0)
+
+func _draw_overpass_ew_underpass(rect: Rect2, scale: float, cur_path: Color, cur_wall: Color) -> void:
+	var tunnel_bg = Color(maxf(0.0, cur_path.r - 0.04), maxf(0.0, cur_path.g - 0.08), maxf(0.0, cur_path.b - 0.10))
+	draw_rect(rect, tunnel_bg)
+
+	var line_w = maxf(1.0, scale * 1.5)
+	draw_line(rect.position, Vector2(rect.position.x, rect.position.y + rect.size.y), cur_wall, line_w)
+	draw_line(Vector2(rect.position.x + rect.size.x - 1.0, rect.position.y), Vector2(rect.position.x + rect.size.x - 1.0, rect.position.y + rect.size.y), cur_wall, line_w)
+
+	draw_rect(rect, Color(0.01, 0.02, 0.05, 0.40))
+
+func _draw_overpass_ew_bridge_deck(rect: Rect2, scale: float, cur_wall: Color) -> void:
+	var bh = maxf(4.0, rect.size.y * 0.70)
+	var by = rect.position.y + (rect.size.y - bh) / 2.0
+
+	var shadow_off_x = maxf(2.0, scale * 3.5)
+	var shadow_off_y = maxf(1.0, scale * 2.0)
+	var shadow_rect = Rect2(Vector2(rect.position.x + shadow_off_x, by + shadow_off_y), Vector2(rect.size.x, bh))
+	draw_rect(shadow_rect, Color(0.01, 0.02, 0.05, 0.55))
+
+	var bridge_deck = Rect2(Vector2(rect.position.x, by), Vector2(rect.size.x, bh))
+	draw_rect(bridge_deck, Color(0.96, 0.97, 1.0))
+
+	var line_w = maxf(1.0, scale * 1.5)
+	draw_line(Vector2(rect.position.x, by), Vector2(rect.position.x + rect.size.x, by), cur_wall, line_w)
+	draw_line(Vector2(rect.position.x, by + bh - 1.0), Vector2(rect.position.x + rect.size.x, by + bh - 1.0), cur_wall, line_w)
+
+	if rect.size.y >= 8.0:
+		draw_line(Vector2(rect.position.x, by + 2.0), Vector2(rect.position.x + rect.size.x, by + 2.0), Color(0.86, 0.16, 0.16), 1.0)
+		draw_line(Vector2(rect.position.x, by + bh - 3.0), Vector2(rect.position.x + rect.size.x, by + bh - 3.0), Color(0.86, 0.16, 0.16), 1.0)
 
 func _draw_mini_tree(rect: Rect2) -> void:
 	var s = rect.size.x

@@ -16,6 +16,7 @@ class Player:
         self.anim_frame = 0   # 0 或 1，走动动画帧
         self.is_moving = False
         self._step_counter = 0
+        self.overpass_layer = "none" # 立交桥层级: "none", "ns_bridge", "ew_tunnel"
 
     def update(
         self,
@@ -59,6 +60,28 @@ class Player:
 
         self.is_moving = moved
 
+        # 更新在 OVERPASS 瓦片上的层级状态
+        cx = self.rect.centerx // cell_size
+        cy = self.rect.centery // cell_size
+        if 0 <= cx < maze.cols and 0 <= cy < maze.rows:
+            tile_val = maze.grid[cy][cx]
+            if tile_val == 2:  # OVERPASS_NS (南北桥，东西隧道)
+                if self.overpass_layer == "none":
+                    if self.facing in ("up", "down"):
+                        self.overpass_layer = "ns_bridge"
+                    else:
+                        self.overpass_layer = "ew_tunnel"
+            elif tile_val == 3:  # OVERPASS_EW (东西桥，南北隧道)
+                if self.overpass_layer == "none":
+                    if self.facing in ("left", "right"):
+                        self.overpass_layer = "ew_bridge"
+                    else:
+                        self.overpass_layer = "ns_tunnel"
+            else:
+                self.overpass_layer = "none"
+        else:
+            self.overpass_layer = "none"
+
         if self.is_moving:
             self._step_counter += 1
             # 步频计时：每 12 帧交替动画帧并播放脚步声
@@ -73,7 +96,8 @@ class Player:
     def _move(self, dx: float, dy: float, maze: Maze, cell_size: int) -> None:
         """单轴尝试移动；新矩形只要盖到任何墙格就整段取消。"""
         trial = self.rect.move(round(dx), round(dy))
-        if not _hits_wall(trial, maze, cell_size):
+        is_y_axis = (dy != 0)
+        if not _hits_wall(trial, maze, cell_size, is_y_axis=is_y_axis, player=self):
             self.rect = trial
 
     def reached_exit(self, maze: Maze, cell_size: int) -> bool:
@@ -87,14 +111,32 @@ class Player:
         return self.rect.colliderect(exit_rect.inflate(-cell_size // 4, -cell_size // 4))
 
 
-def _hits_wall(rect: pygame.Rect, maze: Maze, cell_size: int) -> bool:
-    """用角色矩形覆盖到的瓦片范围做碰撞，比逐像素查表便宜。"""
+def _hits_wall(
+    rect: pygame.Rect,
+    maze: Maze,
+    cell_size: int,
+    is_y_axis: bool = False,
+    player: Player | None = None,
+) -> bool:
+    """用角色矩形覆盖到的瓦片范围做碰撞，比逐像素查表便宜。支持 OVERPASS 立交桥方向与护栏判定。"""
     left = rect.left // cell_size
     right = (rect.right - 1) // cell_size
     top = rect.top // cell_size
     bottom = (rect.bottom - 1) // cell_size
+    px = rect.centerx
+    py = rect.centery
+    current_layer = player.overpass_layer if player else "none"
+
     for tile_y in range(top, bottom + 1):
         for tile_x in range(left, right + 1):
-            if maze.is_wall(tile_x, tile_y):
+            if maze.is_wall(
+                tile_x,
+                tile_y,
+                is_y_axis=is_y_axis,
+                player_x=px,
+                player_y=py,
+                cell_size=cell_size,
+                current_layer=current_layer,
+            ):
                 return True
     return False
