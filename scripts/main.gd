@@ -11,6 +11,9 @@ var maze_data: MazeGenerator.MazeData = null
 var player: MazePlayer = null
 var won: bool = false
 var auto_advance_timer: float = -1.0
+var win_path: Array[Vector2i] = []
+var w6_collection_slots: Array[Label] = []
+var w6_collection_status_lbl: Label = null
 
 # 视口与摄像机控制
 var camera_scale: float = 1.0
@@ -82,7 +85,8 @@ const WORLD_ITEM_INFO = {
 	2: {"name": "肉块", "icon": "🥩", "unit": "块"},
 	3: {"name": "钥匙", "icon": "🔑", "unit": "把"},
 	4: {"name": "宝石", "icon": "💎", "unit": "颗"},
-	5: {"name": "能量核心", "icon": "⚡", "unit": "核"}
+	5: {"name": "能量核心", "icon": "⚡", "unit": "核"},
+	6: {"name": "提示词卷轴", "icon": "📜", "unit": "卷"}
 }
 
 var item_tiles: Array[Vector2i] = []
@@ -367,6 +371,30 @@ func _setup_sidebar_level_select_buttons() -> void:
 		grid5.add_child(btn)
 		sidebar_level_buttons[Vector2i(5, i)] = btn
 
+	var w6_lbl = Label.new()
+	w6_lbl.text = "🔤 第六大关 (提示词阵):"
+	w6_lbl.add_theme_color_override("font_color", Color(0.3, 0.95, 1.0))
+	w6_lbl.add_theme_font_size_override("font_size", 11)
+	parent_vbox.add_child(w6_lbl)
+
+	var grid6 = GridContainer.new()
+	grid6.columns = 5
+	grid6.add_theme_constant_override("h_separation", 3)
+	grid6.add_theme_constant_override("v_separation", 3)
+	parent_vbox.add_child(grid6)
+
+	for i in range(1, 11):
+		var btn = Button.new()
+		btn.text = str(i)
+		btn.custom_minimum_size = Vector2(38, 22)
+		btn.add_theme_font_size_override("font_size", 11)
+		var lvl_num = i
+		btn.pressed.connect(func():
+			_start_free_mode_at_level(6, lvl_num)
+		)
+		grid6.add_child(btn)
+		sidebar_level_buttons[Vector2i(6, i)] = btn
+
 	var btn_auto = Button.new()
 	btn_auto.text = "🧭 自动寻路：已关闭 [点击演示]"
 	btn_auto.custom_minimum_size = Vector2(210, 26)
@@ -391,6 +419,42 @@ func _setup_sidebar_level_select_buttons() -> void:
 	)
 	parent_vbox.add_child(btn_view)
 	sidebar_btn_view = btn_view
+
+	# --- 🔤 第六关 提示词集锦卡片 ---
+	var w6_card = PanelContainer.new()
+	var w6_vbox = VBoxContainer.new()
+	w6_vbox.add_theme_constant_override("separation", 3)
+
+	var w6_title = Label.new()
+	w6_title.text = "📜 提示词阵收集 [ KEEP GOING! ]"
+	w6_title.add_theme_color_override("font_color", Color(0.3, 0.95, 1.0))
+	w6_title.add_theme_font_size_override("font_size", 11)
+	w6_vbox.add_child(w6_title)
+
+	var w6_hbox = HBoxContainer.new()
+	w6_hbox.add_theme_constant_override("separation", 2)
+
+	w6_collection_slots.clear()
+	for i in range(10):
+		var slot_lbl = Label.new()
+		slot_lbl.text = "·"
+		slot_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		slot_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		slot_lbl.custom_minimum_size = Vector2(19, 20)
+		slot_lbl.add_theme_font_size_override("font_size", 11)
+		slot_lbl.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
+		w6_hbox.add_child(slot_lbl)
+		w6_collection_slots.append(slot_lbl)
+	w6_vbox.add_child(w6_hbox)
+
+	w6_collection_status_lbl = Label.new()
+	w6_collection_status_lbl.text = "收集进度: 0/10 关"
+	w6_collection_status_lbl.add_theme_color_override("font_color", Color(0.7, 0.85, 0.95))
+	w6_collection_status_lbl.add_theme_font_size_override("font_size", 11)
+	w6_vbox.add_child(w6_collection_status_lbl)
+
+	w6_card.add_child(w6_vbox)
+	parent_vbox.add_child(w6_card)
 
 func trigger_auto_path() -> void:
 	show_auto_path = not show_auto_path
@@ -482,7 +546,7 @@ func _start_new_game(world: int = 1, level: int = 1) -> void:
 		return
 	regen_cooldown_msec = now_msec
 
-	current_world = clampi(world, 1, 5)
+	current_world = clampi(world, 1, 6)
 	difficulty_level = clampi(level, 1, 10)
 	won = false
 	auto_advance_timer = -1.0
@@ -494,7 +558,9 @@ func _start_new_game(world: int = 1, level: int = 1) -> void:
 	start_time_msec = 0
 	current_time_sec = 0.0
 
-	if current_world == 5:
+	if current_world == 6:
+		_switch_bgm("pattern")
+	elif current_world == 5:
 		_switch_bgm("woven")
 	elif current_world == 4:
 		_switch_bgm("shape")
@@ -518,21 +584,14 @@ func _start_new_game(world: int = 1, level: int = 1) -> void:
 		item_tiles.clear()
 		total_items_count = 0
 	gate_locked_tip_timer = 0.0
-	if show_auto_path and maze_data != null:
-		var res = maze_data.solve_path_with_visited()
-		auto_visited_order = res["visited_order"]
-		auto_path = res["path"]
-		auto_parent_map = res["parent"]
-		auto_search_idx = 0.0
-		auto_path_idx = 0.0
-		auto_path_phase = "search"
-	else:
-		auto_visited_order.clear()
-		auto_path.clear()
-		auto_parent_map.clear()
-		auto_search_idx = 0.0
-		auto_path_idx = 0.0
-		auto_path_phase = "idle"
+	show_auto_path = false
+	auto_visited_order.clear()
+	auto_path.clear()
+	auto_parent_map.clear()
+	auto_search_idx = 0.0
+	auto_path_idx = 0.0
+	auto_path_phase = "idle"
+	win_path.clear()
 	_update_auto_btn_text()
 
 	# 初始化玩家起始位置
@@ -657,6 +716,14 @@ func _advance_next_level() -> void:
 				difficulty_level += 1
 				_start_new_game(current_world, difficulty_level)
 			else:
+				current_world = 6
+				difficulty_level = 1
+				_start_new_game(current_world, difficulty_level)
+		elif current_world == 6:
+			if difficulty_level < 10:
+				difficulty_level += 1
+				_start_new_game(current_world, difficulty_level)
+			else:
 				_start_challenge_mode()
 	else:
 		if difficulty_level < 10:
@@ -674,6 +741,9 @@ func _advance_next_level() -> void:
 			elif current_world == 4:
 				current_world = 5
 				difficulty_level = 1
+			elif current_world == 5:
+				current_world = 6
+				difficulty_level = 1
 			else:
 				current_world = 1
 				difficulty_level = 1
@@ -683,7 +753,10 @@ func _prev_level() -> void:
 	if difficulty_level > 1:
 		difficulty_level -= 1
 	else:
-		if current_world == 5:
+		if current_world == 6:
+			current_world = 5
+			difficulty_level = 10
+		elif current_world == 5:
 			current_world = 4
 			difficulty_level = 10
 		elif current_world == 4:
@@ -696,7 +769,7 @@ func _prev_level() -> void:
 			current_world = 1
 			difficulty_level = 10
 		else:
-			current_world = 5
+			current_world = 6
 			difficulty_level = 10
 	_start_new_game(current_world, difficulty_level)
 
@@ -1039,8 +1112,11 @@ func _physics_process(delta: float) -> void:
 		if player.check_reached_exit(maze_data, CELL_SIZE):
 			if item_tiles.is_empty():
 				won = true
+				fit_to_screen()
 				if not (game_mode == "challenge" and challenge_completed):
-					auto_advance_timer = 1.2
+					auto_advance_timer = 5.0 if (current_world == 6 or (maze_data != null and maze_data.word_prompt != "")) else 1.2
+				if maze_data != null:
+					win_path = maze_data.solve_path()
 				if wolf_active:
 					wolf_crying = true
 
@@ -1136,11 +1212,11 @@ func _update_hud() -> void:
 
 	var stage_idx = (current_world - 1) * 10 + difficulty_level
 	if level_label != null:
-		var world_tag = "🌉 立交编织" if current_world == 5 else ("🌀 异形几何" if current_world == 4 else ("🌟 图案秘境" if current_world == 3 else ("🏰 狼穴地牢" if current_world == 2 else "🌲 绿野森林")))
+		var world_tag = "🔤 提示词阵" if current_world == 6 else ("🌉 立交编织" if current_world == 5 else ("🌀 异形几何" if current_world == 4 else ("🌟 图案秘境" if current_world == 3 else ("🏰 狼穴地牢" if current_world == 2 else "🌲 绿野森林"))))
 		if game_mode == "free":
 			level_label.text = "%s (第%d大关 %d阶)" % [world_tag, current_world, difficulty_level]
 		else:
-			level_label.text = "%s (第%d/50关)" % [world_tag, stage_idx]
+			level_label.text = "%s (第%d/60关)" % [world_tag, stage_idx]
 
 	if points_info_label != null:
 		var base_pts = (current_world - 1) * 1000 + difficulty_level * 100
@@ -1149,8 +1225,44 @@ func _update_hud() -> void:
 		else:
 			points_info_label.text = "本阶得分: +%d分 (破纪录加倍)" % base_pts
 
+	var w6_letters = ["K", "E", "E", "P", "G", "O", "I", "N", "G", "!"]
+	var collected_cnt = 0
+	for i in range(10):
+		var lvl_num = i + 1
+		var rec_k = "6_%d" % lvl_num
+		var is_col = best_records.has(rec_k) or (won and current_world == 6 and difficulty_level == lvl_num)
+		if is_col:
+			collected_cnt += 1
+		if i < w6_collection_slots.size():
+			var sl = w6_collection_slots[i]
+			if is_col:
+				sl.text = w6_letters[i]
+				if current_world == 6 and difficulty_level == lvl_num:
+					sl.add_theme_color_override("font_color", Color(1.0, 0.95, 0.3))
+				else:
+					sl.add_theme_color_override("font_color", Color(0.3, 0.95, 1.0))
+			else:
+				sl.text = "·"
+				sl.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
+
+	if w6_collection_status_lbl != null:
+		if collected_cnt == 10:
+			w6_collection_status_lbl.text = "✨ 10/10 全满贯拼齐! 永不放弃！"
+			w6_collection_status_lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
+		else:
+			w6_collection_status_lbl.text = "收集进度: %d/10 关 (通关解锁)" % collected_cnt
+			w6_collection_status_lbl.add_theme_color_override("font_color", Color(0.7, 0.85, 0.95))
+
 	for key in sidebar_level_buttons.keys():
 		var b = sidebar_level_buttons[key]
+		if key.x == 6:
+			var lvl_idx = key.y
+			var is_cleared = best_records.has("6_%d" % lvl_idx) or (won and current_world == 6 and difficulty_level == lvl_idx)
+			if is_cleared:
+				b.text = "%d:%s" % [lvl_idx, w6_letters[lvl_idx - 1]]
+			else:
+				b.text = str(lvl_idx)
+
 		if key == Vector2i(current_world, difficulty_level):
 			b.add_theme_color_override("font_color", Color(1, 0.9, 0.3))
 		else:
@@ -1173,13 +1285,19 @@ func _update_hud() -> void:
 
 	if status_label != null:
 		if game_mode == "challenge" and challenge_completed:
-			status_label.text = "🏆 大满贯全通关！\n1~50关总用时: %.2f 秒\n获得全通总分: +%d 分\n👉 按 R 重测，按 M 返回主菜单" % [challenge_total_time, challenge_total_score]
+			status_label.text = "🏆 大满贯全通关！\n1~60关总用时: %.2f 秒\n获得全通总分: +%d 分\n👉 按 R 重测，按 M 返回主菜单" % [challenge_total_time, challenge_total_score]
 		elif won:
-			var next_str = "第%d大关 %d阶" % [current_world, difficulty_level + 1] if difficulty_level < 10 else ("第2大关 1阶" if current_world == 1 else ("第3大关 1阶" if current_world == 2 else ("第4大关 1阶" if current_world == 3 else ("第5大关 1阶" if current_world == 4 else "第1大关 1阶"))))
+			var next_str = "第%d大关 %d阶" % [current_world, difficulty_level + 1] if difficulty_level < 10 else ("第2大关 1阶" if current_world == 1 else ("第3大关 1阶" if current_world == 2 else ("第4大关 1阶" if current_world == 3 else ("第5大关 1阶" if current_world == 4 else ("第6大关 1阶" if current_world == 5 else "第1大关 1阶")))))
+			var prompt_msg = ""
+			if current_world == 6:
+				var prog_str = MazeGenerator.get_keep_going_progress(difficulty_level)
+				prompt_msg = "\n🔤 破解字母路径: 【 %s 】  拼词进度: %s" % [maze_data.word_prompt, prog_str]
+			elif maze_data != null and maze_data.word_prompt != "":
+				prompt_msg = "\n🔤 破解隐秘提示词: 【 %s 】" % maze_data.word_prompt
 			if auto_advance_timer > 0.0:
-				status_label.text = "🎉 成功通关！ 获得积分: +%d 分\n👉 %.1fs后自动进入 %s (按空格/点击加速)" % [last_round_score, auto_advance_timer, next_str]
+				status_label.text = "🎉 成功通关！ 获得积分: +%d 分%s\n👉 %.1fs后自动进入 %s (按空格/点击加速)" % [last_round_score, prompt_msg, auto_advance_timer, next_str]
 			else:
-				status_label.text = "🎉 成功通关！ 获得积分: +%d 分\n👉 按 R / 空格 / 点击进入 %s" % [last_round_score, next_str]
+				status_label.text = "🎉 成功通关！ 获得积分: +%d 分%s\n👉 按 R / 空格 / 点击进入 %s" % [last_round_score, prompt_msg, next_str]
 		elif caught_by_wolf:
 			status_label.text = "😱 被大灰狼抓住了！\n本局得分: 0 分\n👉 按 R 重新尝试本关"
 		else:
@@ -1246,7 +1364,11 @@ func _draw() -> void:
 	var cur_bg = COLOR_BG
 	var cur_wall = COLOR_WALL
 	var cur_path = COLOR_PATH
-	if current_world == 5:
+	if current_world == 6:
+		cur_bg = Color(0.04, 0.08, 0.12)
+		cur_wall = Color(0.12, 0.22, 0.32)
+		cur_path = Color(0.12, 0.38, 0.48)
+	elif current_world == 5:
 		cur_bg = Color(0.05, 0.06, 0.11)
 		cur_wall = Color(0.14, 0.18, 0.25)
 		cur_path = Color(0.10, 0.35, 0.43)
@@ -1307,7 +1429,11 @@ func _draw() -> void:
 				var is_pat = (maze_data.pattern_cells.has(Vector2i(x, y)))
 				var is_shp = (current_world == 4 and maze_data.shape_cells.has(Vector2i(x, y)))
 				if is_pat:
-					color = Color(0.51, 0.18, 0.43) if current_world == 5 else Color(0.37, 0.18, 0.49)
+					if won and current_world == 6:
+						var pulse = (sin(Time.get_ticks_msec() * 0.01) + 1.0) * 0.5
+						color = Color(0.1, 0.65 + 0.3 * pulse, 0.85 + 0.15 * pulse)
+					else:
+						color = Color(0.18, 0.52, 0.65) if current_world == 6 else (Color(0.51, 0.18, 0.43) if current_world == 5 else Color(0.37, 0.18, 0.49))
 				elif is_shp:
 					color = Color(0.12, 0.35, 0.43)
 				draw_rect(rect, color)
@@ -1318,7 +1444,13 @@ func _draw() -> void:
 				elif y - 1 >= 0 and (maze_data.grid[y - 1][x] == MazeGenerator.OVERPASS_NS or maze_data.grid[y - 1][x] == MazeGenerator.OVERPASS_EW):
 					_draw_ramp_slope(rect, camera_scale, "north")
 
-				if is_pat and rect.size.x >= 4.0:
+				if is_pat and current_world == 6 and rect.size.x >= 3.0:
+					if won:
+						var pulse = (sin(Time.get_ticks_msec() * 0.012) + 1.0) * 0.5
+						draw_rect(rect, Color(0.6 + 0.4 * pulse, 1.0, 1.0), false, maxf(2.0, camera_scale * 3.0))
+					else:
+						draw_rect(rect, Color(0.3, 0.95, 1.0), false, 1.5)
+				elif is_pat and rect.size.x >= 4.0:
 					draw_rect(rect, Color(0.86, 0.63, 1.0), false, 1.0)
 				elif is_shp and rect.size.x >= 4.0:
 					draw_rect(rect, Color(0.58, 0.94, 1.0), false, 1.0)
@@ -1390,37 +1522,45 @@ func _draw() -> void:
 					var tip_p = trail_pts[-1]
 					draw_circle(tip_p, max(4.0, camera_scale * 7.0), Color(0.0, 1.0, 0.7))
 
-		# 2. 找到终点后，绘制从起点延伸至终点的最终最优路径 (金黄色光轨)
-		if auto_path.size() > 0 and path_idx_int > 0 and (auto_path_phase == "path" or auto_path_phase == "complete"):
-			var pts: PackedVector2Array = []
-			var limit = min(path_idx_int, auto_path.size())
-			for i in range(limit):
-				var tile = auto_path[i]
-				var center_w = Vector2(tile.x + 0.5, tile.y + 0.5) * CELL_SIZE
-				var screen_p = offset_pos + center_w * camera_scale
-				pts.append(screen_p)
+	# 2. 通关终点全景解法路线高亮绘制 (或自动寻路动画)
+	var active_draw_path: Array[Vector2i] = []
+	if won and win_path.size() > 0:
+		active_draw_path = win_path
+	elif show_auto_path and auto_path.size() > 0 and int(auto_path_idx) > 0 and (auto_path_phase == "path" or auto_path_phase == "complete"):
+		var limit = min(int(auto_path_idx), auto_path.size())
+		active_draw_path = auto_path.slice(0, limit)
 
-			if pts.size() >= 2:
-				if current_world == 5:
-					var glow_w = maxf(5.0, camera_scale * 10.0)
-					var core_w = maxf(3.0, camera_scale * 5.0)
-					draw_polyline(pts, Color(0.55, 0.06, 0.06, 1.0), glow_w)
-					draw_polyline(pts, Color(0.90, 0.16, 0.16, 1.0), core_w)
-					var r_dot = maxf(2.0, camera_scale * 3.5)
-					for p in pts:
-						draw_circle(p, r_dot, Color(0.90, 0.16, 0.16))
-				else:
-					var glow_w = max(3.0, camera_scale * 8.0)
-					var core_w = max(1.0, camera_scale * 3.0)
-					draw_polyline(pts, Color(1.0, 0.78, 0.20, 0.9), glow_w)
-					draw_polyline(pts, Color(1.0, 1.0, 0.85, 1.0), core_w)
-					var r_dot = max(2.0, camera_scale * 3.0)
-					for p in pts:
-						draw_circle(p, r_dot, Color(1.0, 0.88, 0.35))
+	if active_draw_path.size() >= 2:
+		var pts: PackedVector2Array = []
+		for tile in active_draw_path:
+			var center_w = Vector2(tile.x + 0.5, tile.y + 0.5) * CELL_SIZE
+			var screen_p = offset_pos + center_w * camera_scale
+			pts.append(screen_p)
 
-			if auto_path_phase == "path" and pts.size() > 0:
-				var tip_p = pts[-1]
-				draw_circle(tip_p, max(4.0, camera_scale * 7.0), Color(1.0, 1.0, 0.47))
+		if current_world == 6:
+			var glow_w = maxf(5.0, camera_scale * 10.0)
+			var core_w = maxf(3.0, camera_scale * 5.0)
+			draw_polyline(pts, Color(0.0, 0.85, 0.95, 0.95), glow_w)
+			draw_polyline(pts, Color(0.9, 1.0, 1.0, 1.0), core_w)
+			var r_dot = maxf(2.0, camera_scale * 3.5)
+			for p in pts:
+				draw_circle(p, r_dot, Color(0.2, 0.9, 1.0))
+		elif current_world == 5:
+			var glow_w = maxf(5.0, camera_scale * 10.0)
+			var core_w = maxf(3.0, camera_scale * 5.0)
+			draw_polyline(pts, Color(0.55, 0.06, 0.06, 1.0), glow_w)
+			draw_polyline(pts, Color(0.90, 0.16, 0.16, 1.0), core_w)
+			var r_dot = maxf(2.0, camera_scale * 3.5)
+			for p in pts:
+				draw_circle(p, r_dot, Color(0.90, 0.16, 0.16))
+		else:
+			var glow_w = max(3.0, camera_scale * 8.0)
+			var core_w = max(1.0, camera_scale * 3.0)
+			draw_polyline(pts, Color(1.0, 0.78, 0.20, 0.9), glow_w)
+			draw_polyline(pts, Color(1.0, 1.0, 0.85, 1.0), core_w)
+			var r_dot = max(2.0, camera_scale * 3.0)
+			for p in pts:
+				draw_circle(p, r_dot, Color(1.0, 0.88, 0.35))
 
 	# 绘制萌系 Q 版小人与大灰狼 (若不在地下隧道穿梭状态，在最上层绘制)
 	if not p_in_tunnel:
@@ -1515,7 +1655,7 @@ func _draw_minimap() -> void:
 
 	# 待收集支线道具在小地图上的发光标记点
 	if not item_tiles.is_empty():
-		var item_color = Color(1.0, 0.31, 0.31) if current_world == 1 else (Color(1.0, 0.47, 0.55) if current_world == 2 else (Color(1.0, 0.84, 0.0) if current_world == 3 else (Color(0.0, 0.90, 1.0) if current_world == 4 else Color(1.0, 0.16, 0.78))))
+		var item_color = Color(1.0, 0.31, 0.31) if current_world == 1 else (Color(1.0, 0.47, 0.55) if current_world == 2 else (Color(1.0, 0.84, 0.0) if current_world == 3 else (Color(0.0, 0.90, 1.0) if current_world == 4 else (Color(1.0, 0.16, 0.78) if current_world == 5 else Color(0.3, 0.95, 1.0)))))
 		for it in item_tiles:
 			var it_x = map_start_x + (float(it.x) + 0.5) * cw
 			var it_y = map_start_y + (float(it.y) + 0.5) * ch
@@ -1761,6 +1901,15 @@ func _draw_item_icon(rect: Rect2, world: int, scale: float) -> void:
 		draw_circle(Vector2(cx, cy), r_outer, Color(1.0, 0.16, 0.63), false, maxf(1.0, scale * 2.0))
 		draw_circle(Vector2(cx, cy), maxf(3.0, r_outer * 0.65), Color(0.0, 0.94, 1.0))
 		draw_circle(Vector2(cx, cy), maxf(1.0, r_outer * 0.3), Color(1.0, 1.0, 0.86))
+
+	elif world == 6:
+		var rw = maxf(4.0, w * 0.50)
+		var rh = maxf(3.0, h * 0.38)
+		var scroll_rect = Rect2(cx - rw * 0.5, cy - rh * 0.5, rw, rh)
+		draw_rect(scroll_rect, Color(0.96, 0.90, 0.72))
+		draw_rect(scroll_rect, Color(0.80, 0.60, 0.20), false, maxf(1.0, scale * 1.5))
+		draw_line(Vector2(cx - rw * 0.3, cy - rh * 0.15), Vector2(cx + rw * 0.3, cy - rh * 0.15), Color(0.4, 0.3, 0.1), maxf(1.0, scale * 1.2))
+		draw_line(Vector2(cx - rw * 0.3, cy + rh * 0.15), Vector2(cx + rw * 0.2, cy + rh * 0.15), Color(0.4, 0.3, 0.1), maxf(1.0, scale * 1.2))
 
 func _draw_tile_marker(tile: Vector2i, color: Color, type: String) -> void:
 	var p1 = offset_pos + Vector2(tile.x * CELL_SIZE, tile.y * CELL_SIZE) * camera_scale

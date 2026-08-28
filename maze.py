@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import math
+import heapq
 import random
 from collections import deque
 from dataclasses import dataclass, field
@@ -94,6 +95,166 @@ W5_DIFFICULTIES = {
     "9": {"cell_cols": 38, "cell_rows": 38, "woven_target": 80, "loop_ratio": 0.08, "pattern": "crown", "name": "皇冠无尽编织天桥"},
     "10": {"cell_cols": 42, "cell_rows": 42, "woven_target": 100, "loop_ratio": 0.09, "pattern": "sword", "name": "宝剑立体极限巨阵"},
 }
+
+# 第六大关：提示词隐语阵 (Opt-Maze Word Prompt Realm - KEEP GOING!) 1-10 阶参数配置
+W6_DIFFICULTIES = {
+    "1": {"cell_cols": 22, "cell_rows": 28, "word": "K", "loop_ratio": 0.06, "name": "字母 K - Keep 序章", "description": "KEEP GOING! 1/10"},
+    "2": {"cell_cols": 22, "cell_rows": 28, "word": "E", "loop_ratio": 0.06, "name": "字母 E - Energy 能量", "description": "KEEP GOING! 2/10"},
+    "3": {"cell_cols": 22, "cell_rows": 28, "word": "E", "loop_ratio": 0.06, "name": "字母 E - Explore 探索", "description": "KEEP GOING! 3/10"},
+    "4": {"cell_cols": 22, "cell_rows": 28, "word": "P", "loop_ratio": 0.07, "name": "字母 P - Power 力量", "description": "KEEP GOING! 4/10"},
+    "5": {"cell_cols": 24, "cell_rows": 28, "word": "G", "loop_ratio": 0.07, "name": "字母 G - Growth 生长", "description": "KEEP GOING! 5/10"},
+    "6": {"cell_cols": 24, "cell_rows": 28, "word": "O", "loop_ratio": 0.07, "name": "字母 O - Overcome 跨越", "description": "KEEP GOING! 6/10"},
+    "7": {"cell_cols": 16, "cell_rows": 28, "word": "I", "loop_ratio": 0.07, "name": "字母 I - Insight 洞察", "description": "KEEP GOING! 7/10"},
+    "8": {"cell_cols": 24, "cell_rows": 28, "word": "N", "loop_ratio": 0.08, "name": "字母 N - Never Give Up", "description": "KEEP GOING! 8/10"},
+    "9": {"cell_cols": 26, "cell_rows": 30, "word": "G", "loop_ratio": 0.08, "name": "字母 G - Glory 荣耀", "description": "KEEP GOING! 9/10"},
+    "10": {"cell_cols": 18, "cell_rows": 32, "word": "!", "loop_ratio": 0.09, "name": "感叹号 ! - 永不放弃!", "description": "KEEP GOING! 10/10"},
+}
+
+HIGH_RES_LETTERS = {
+    "K": [
+        "**    **",
+        "**   ** ",
+        "**  **  ",
+        "*****   ",
+        "***     ",
+        "*****   ",
+        "**  **  ",
+        "**   ** ",
+        "**    **",
+    ],
+    "E": [
+        "*******",
+        "**     ",
+        "**     ",
+        "*****  ",
+        "**     ",
+        "**     ",
+        "*******",
+    ],
+    "P": [
+        "****** ",
+        "**   **",
+        "**   **",
+        "****** ",
+        "**     ",
+        "**     ",
+        "**     ",
+    ],
+    "G": [
+        " ***** ",
+        "**   **",
+        "**     ",
+        "**  ***",
+        "**   **",
+        "**   **",
+        " ***** ",
+    ],
+    "O": [
+        " ***** ",
+        "**   **",
+        "**   **",
+        "**   **",
+        "**   **",
+        "**   **",
+        " ***** ",
+    ],
+    "I": [
+        "*****",
+        " **  ",
+        " **  ",
+        " **  ",
+        " **  ",
+        " **  ",
+        "*****",
+    ],
+    "N": [
+        "**    **",
+        "***   **",
+        "****  **",
+        "** ** **",
+        "**  ****",
+        "**   ***",
+        "**    **",
+    ],
+    "!": [
+        "***",
+        "***",
+        "***",
+        "***",
+        "** ",
+        "   ",
+        "** ",
+        "** ",
+    ],
+}
+
+PIXEL_FONT = {
+    "A": [" *** ", "*   *", "*****", "*   *", "*   *"],
+    "B": ["**** ", "*   *", "**** ", "*   *", "**** "],
+    "C": [" ****", "*    ", "*    ", "*    ", " ****"],
+    "D": ["**** ", "*   *", "*   *", "*   *", "**** "],
+    "E": ["*****", "*    ", "**** ", "*    ", "*****"],
+    "F": ["*****", "*    ", "**** ", "*    ", "*    "],
+    "G": [" ****", "*    ", "* ***", "*   *", " ****"],
+    "H": ["*   *", "*   *", "*****", "*   *", "*   *"],
+    "I": ["***", " * ", " * ", " * ", "***"],
+    "J": ["  ***", "   * ", "   * ", "*  * ", " **  "],
+    "K": ["*  *", "* * ", "**  ", "* * ", "*  *"],
+    "L": ["*    ", "*    ", "*    ", "*    ", "*****"],
+    "M": ["*   *", "** **", "* * *", "*   *", "*   *"],
+    "N": ["*   *", "**  *", "* * *", "*  **", "*   *"],
+    "O": [" *** ", "*   *", "**** ", "*    ", "*    "],
+    "P": ["**** ", "*   *", "**** ", "*    ", "*    "],
+    "Q": [" *** ", "*   *", "* * *", "*  **", " ****"],
+    "R": ["**** ", "*   *", "**** ", "*  * ", "*   *"],
+    "S": [" ****", "*    ", " *** ", "    *", "**** "],
+    "T": ["*****", "  *  ", "  *  ", "  *  ", "  *  "],
+    "U": ["*   *", "*   *", "*   *", "*   *", " *** "],
+    "V": ["*   *", "*   *", "*   *", " * * ", "  *  "],
+    "W": ["*   *", "*   *", "* * *", "** **", "*   *"],
+    "X": ["*   *", " * * ", "  *  ", " * * ", "*   *"],
+    "Y": ["*   *", " * * ", "  *  ", "  *  ", "  *  "],
+    "Z": ["*****", "   * ", "  *  ", " *   ", "*****"],
+    "0": [" *** ", "*  **", "* * *", "**  *", " *** "],
+    "1": ["  *  ", " **  ", "  *  ", "  *  ", " *** "],
+    "2": [" *** ", "*   *", "  ** ", " *   ", "*****"],
+    "3": ["**** ", "    *", " *** ", "    *", "**** "],
+    "4": ["*  * ", "*  * ", "*****", "   * ", "   * "],
+    "5": ["*****", "*    ", "**** ", "    *", "**** "],
+    "6": [" ****", "*    ", "**** ", "*   *", " *** "],
+    "7": ["*****", "   * ", "  *  ", " *   ", " *   "],
+    "8": [" *** ", "*   *", " *** ", "*   *", " *** "],
+    "9": [" *** ", "*   *", " ****", "    *", " ****"],
+    " ": ["  ", "  ", "  ", "  ", "  "],
+}
+
+
+def string_to_pattern(text: str) -> list[str]:
+    text_upper = text.upper()
+    if len(text_upper) == 1 and text_upper in HIGH_RES_LETTERS:
+        return list(HIGH_RES_LETTERS[text_upper])
+
+    pattern_lines = ["", "", "", "", ""]
+    for i, ch in enumerate(text_upper):
+        glyph = PIXEL_FONT.get(ch, PIXEL_FONT.get(" ", ["  ", "  ", "  ", "  ", "  "]))
+        for row in range(5):
+            pattern_lines[row] += glyph[row]
+            if i < len(text_upper) - 1:
+                pattern_lines[row] += " "
+    return pattern_lines
+
+
+def get_keep_going_progress(level: int) -> str:
+    chars = ["K", "E", "E", "P", "G", "O", "I", "N", "G", "!"]
+    res = ""
+    for i in range(len(chars)):
+        if i == 4:
+            res += "  "
+        if i < level:
+            res += chars[i] + " "
+        else:
+            res += "_ "
+    return res.strip()
 
 PATTERNS = {
     "star": [
@@ -229,6 +390,7 @@ class Maze:
     shape_cells: set[tuple[int, int]] = field(default_factory=set)
     overpass_cells: set[tuple[int, int]] = field(default_factory=set)
     item_tiles: set[tuple[int, int]] = field(default_factory=set)
+    word_prompt: str = ""
 
     @property
     def cols(self) -> int:
@@ -309,7 +471,10 @@ def generate_maze(
             l_val = int(parts[1])
         else:
             val = int(key_str)
-            if val > 40:
+            if val > 50:
+                w_val = 6
+                l_val = val - 50
+            elif val > 40:
                 w_val = 5
                 l_val = val - 40
             elif val > 30:
@@ -325,10 +490,12 @@ def generate_maze(
                 w_val = 1
                 l_val = val
 
-    w_val = max(1, min(5, w_val))
+    w_val = max(1, min(6, w_val))
     l_val = max(1, min(10, l_val))
 
-    if w_val == 5:
+    if w_val == 6:
+        spec = W6_DIFFICULTIES[str(l_val)]
+    elif w_val == 5:
         spec = W5_DIFFICULTIES[str(l_val)]
     elif w_val == 4:
         spec = W4_DIFFICULTIES[str(l_val)]
@@ -345,7 +512,10 @@ def generate_maze(
     display_key = f"{w_val}_{l_val}"
 
     for _ in range(attempts):
-        if w_val == 5:
+        if w_val == 6:
+            word = spec.get("word", "K")
+            maze = _carve_word_prompt_maze(spec, word, display_key, rng)
+        elif w_val == 5:
             maze = _carve_woven_maze(spec, display_key, rng)
         elif w_val == 4:
             maze = _carve_shape_maze(spec, display_key, rng)
@@ -361,11 +531,11 @@ def generate_maze(
 
         min_path_len = spec["cell_cols"] * spec["cell_rows"] * (0.35 if w_val == 1 else 0.20)
         if maze.metrics.path_length >= min_path_len:
-            if w_val in (2, 3, 4, 5) or maze.metrics.avg_dead_end_depth >= spec.get("min_dead_end_depth", 0):
+            if w_val in (2, 3, 4, 5, 6) or maze.metrics.avg_dead_end_depth >= spec.get("min_dead_end_depth", 0):
                 break
 
     assert best is not None
-    if w_val in (2, 3, 4, 5):
+    if w_val in (2, 3, 4, 5, 6):
         if w_val in (2, 3, 4):
             loop_ratio = spec.get("loop_ratio", 0.04 if w_val == 2 else 0.06)
             _add_guarded_braid_loops(best.grid, best.entrance, best.exit, loop_ratio, rng)
@@ -378,6 +548,7 @@ def generate_maze(
             pattern_cells=getattr(best, "pattern_cells", set()),
             shape_cells=getattr(best, "shape_cells", set()),
             overpass_cells=getattr(best, "overpass_cells", set()),
+            word_prompt=getattr(best, "word_prompt", ""),
         )
     best.item_tiles = _place_items(best.grid, best.entrance, best.exit, l_val, rng)
     return best
@@ -645,17 +816,232 @@ def _pattern_components(pattern_rooms: set[tuple[int, int]]) -> dict[tuple[int, 
     return room_map
 
 
-def _carve_pattern_maze(spec: dict, difficulty_key: str, rng: random.Random) -> Maze:
-    """第三大关：图案秘境 (Opt-Maze 隐写融合算法)
+def _get_word_stroke(word: str) -> list[tuple[int, int]]:
+    """获取字母/符号 1-步正交 1D 连续一笔画描边房间坐标 (cx, cy) 序列。"""
+    word_upper = word.upper()
+    strokes: dict[str, list[tuple[int, int]]] = {}
+
+    # 'K'
+    k: list[tuple[int, int]] = []
+    for y in range(1, 14): k.append((1, y))
+    k.append((2, 13))
+    for y in range(12, 6, -1): k.append((2, y))
+    cx, cy = 2, 7
+    for _ in range(5): cx += 1; k.append((cx, cy)); cy -= 1; k.append((cx, cy))
+    cy += 1; k.append((cx, cy))
+    for _ in range(4): cx -= 1; k.append((cx, cy)); cy += 1; k.append((cx, cy))
+    for _ in range(5): cx += 1; k.append((cx, cy)); cy += 1; k.append((cx, cy))
+    strokes["K"] = k
+
+    # 'E'
+    e: list[tuple[int, int]] = []
+    for x in range(1, 9): e.append((x, 1))
+    e.append((8, 2))
+    for x in range(7, 1, -1): e.append((x, 2))
+    for y in range(3, 7): e.append((2, y))
+    for x in range(3, 8): e.append((x, 6))
+    e.append((7, 7))
+    for x in range(6, 1, -1): e.append((x, 7))
+    for y in range(8, 12): e.append((2, y))
+    for x in range(3, 9): e.append((x, 11))
+    strokes["E"] = e
+
+    # 'P'
+    p: list[tuple[int, int]] = []
+    for y in range(1, 14): p.append((1, y))
+    p.append((2, 13))
+    for y in range(12, 6, -1): p.append((2, y))
+    for x in range(3, 8): p.append((x, 7))
+    for y in range(6, 0, -1): p.append((7, y))
+    for x in range(6, 1, -1): p.append((x, 1))
+    strokes["P"] = p
+
+    # 'G'
+    g: list[tuple[int, int]] = []
+    for x in range(8, 0, -1): g.append((x, 1))
+    for y in range(2, 13): g.append((1, y))
+    for x in range(2, 9): g.append((x, 12))
+    for y in range(11, 6, -1): g.append((8, y))
+    for x in range(7, 3, -1): g.append((x, 7))
+    strokes["G"] = g
+
+    # 'O'
+    o: list[tuple[int, int]] = []
+    for x in range(1, 9): o.append((x, 1))
+    for y in range(2, 13): o.append((8, y))
+    for x in range(7, 0, -1): o.append((x, 12))
+    for y in range(11, 1, -1): o.append((1, y))
+    strokes["O"] = o
+
+    # 'I'
+    i_str: list[tuple[int, int]] = []
+    for x in range(1, 9): i_str.append((x, 1))
+    for x in range(8, 3, -1): i_str.append((x, 2))
+    for y in range(3, 12): i_str.append((4, y))
+    for x in range(5, 9): i_str.append((x, 11))
+    for x in range(8, 0, -1): i_str.append((x, 12))
+    strokes["I"] = i_str
+
+    # 'N'
+    n: list[tuple[int, int]] = []
+    for y in range(1, 14): n.append((1, y))
+    n.append((2, 13))
+    for y in range(12, 0, -1): n.append((2, y))
+    cx, cy = 2, 1
+    for _ in range(5):
+        cx += 1; n.append((cx, cy))
+        cy += 1; n.append((cx, cy))
+        cy += 1; n.append((cx, cy))
+    for y in range(10, 0, -1): n.append((7, y))
+    strokes["N"] = n
+
+    # '!'
+    ex: list[tuple[int, int]] = []
+    for y in range(1, 9): ex.append((1, y))
+    ex.append((2, 8))
+    for y in range(7, 0, -1): ex.append((2, y))
+    ex.append((3, 1))
+    for y in range(2, 12): ex.append((3, y))
+    ex.append((2, 11))
+    ex.append((1, 11))
+    strokes["!"] = ex
+
+    return strokes.get(word_upper, strokes["K"])
+
+
+def _find_stroke_connector(
+    src: tuple[int, int], dst: tuple[int, int], stroke_set: set[tuple[int, int]], cols: int, rows: int
+) -> list[tuple[int, int]]:
+    pq = [(0, src)]
+    dist = {src: 0}
+    parent: dict[tuple[int, int], tuple[int, int] | None] = {src: None}
+    while pq:
+        d, curr = heapq.heappop(pq)
+        if curr == dst:
+            break
+        if d > dist.get(curr, 1e9):
+            continue
+        cx, cy = curr
+        for dx, dy in NEIGHBOR_STEPS:
+            nx, ny = cx + dx, cy + dy
+            if 0 <= nx < cols and 0 <= ny < rows:
+                cost = 1 if (nx, ny) not in stroke_set or (nx, ny) == dst else 1000
+                if d + cost < dist.get((nx, ny), 1e9):
+                    dist[(nx, ny)] = d + cost
+                    parent[(nx, ny)] = curr
+                    heapq.heappush(pq, (d + cost, (nx, ny)))
+    res = []
+    curr: tuple[int, int] | None = dst
+    while curr is not None:
+        res.append(curr)
+        curr = parent.get(curr)
+    res.reverse()
+    return res
+
+
+def _carve_word_prompt_maze(spec: dict, word: str, difficulty_key: str, rng: random.Random) -> Maze:
+    """第六大关：提示词隐语阵 (Opt-Maze 1D 连续一笔画描边解法路径算法)
     特点：
-    1. 在迷宫正中央精准融嵌入像素图案 (⭐️爱心、👑皇冠、🔑钥匙、⚔️宝剑等)；
+    1. 迷宫主解法路径 (entrance -> exit) 自身 100% 精确勾勒出目标字母/字符轨迹！
+    2. 入口与出口通过安全连通线无缝对接字母起始与终点；
+    3. 主路径四周通过 Prim 算法密布死胡同分支树，保证迷宫可玩性与难度。
+    """
+    cell_cols = spec["cell_cols"]
+    cell_rows = spec["cell_rows"]
+    stroke_rooms = _get_word_stroke(word)
+
+    width = cell_cols * 2 + 1
+    height = cell_rows * 2 + 1
+    grid = [[WALL for _ in range(width)] for _ in range(height)]
+
+    def cell_to_tile(cx: int, cy: int) -> tuple[int, int]:
+        return cx * 2 + 1, cy * 2 + 1
+
+    max_cx = max(cx for cx, cy in stroke_rooms)
+    max_cy = max(cy for cx, cy in stroke_rooms)
+    off_x = max(1, (cell_cols - 1 - max_cx) // 2)
+    off_y = max(1, (cell_rows - 1 - max_cy) // 2)
+
+    centered_stroke = [(cx + off_x, cy + off_y) for cx, cy in stroke_rooms]
+    stroke_set = set(centered_stroke)
+
+    ent_path = _find_stroke_connector((0, 0), centered_stroke[0], stroke_set, cell_cols, cell_rows)[:-1]
+    exit_path = _find_stroke_connector(
+        centered_stroke[-1], (cell_cols - 1, cell_rows - 1), stroke_set, cell_cols, cell_rows
+    )[1:]
+
+    full_main_path_rooms = ent_path + centered_stroke + exit_path
+
+    pattern_cells: set[tuple[int, int]] = set()
+    visited_rooms: set[tuple[int, int]] = set()
+
+    for i in range(len(full_main_path_rooms)):
+        rcx, rcy = full_main_path_rooms[i]
+        tx, ty = cell_to_tile(rcx, rcy)
+        grid[ty][tx] = PATH
+        visited_rooms.add((rcx, rcy))
+        if (rcx, rcy) in stroke_set:
+            pattern_cells.add((tx, ty))
+
+        if i > 0:
+            prcx, prcy = full_main_path_rooms[i - 1]
+            wx = (rcx + prcx) + 1
+            wy = (rcy + prcy) + 1
+            grid[wy][wx] = PATH
+            if (rcx, rcy) in stroke_set and (prcx, prcy) in stroke_set:
+                pattern_cells.add((wx, wy))
+
+    frontier = []
+    for rcx, rcy in list(visited_rooms):
+        for dcx, dcy in NEIGHBOR_STEPS:
+            ncx, ncy = rcx + dcx, rcy + dcy
+            if 0 <= ncx < cell_cols and 0 <= ncy < cell_rows and (ncx, ncy) not in visited_rooms:
+                frontier.append((rcx, rcy, dcx, dcy))
+
+    while frontier:
+        idx = rng.randrange(len(frontier))
+        cx, cy, dcx, dcy = frontier.pop(idx)
+        ncx, ncy = cx + dcx, cy + dcy
+        if (ncx, ncy) in visited_rooms:
+            continue
+        visited_rooms.add((ncx, ncy))
+        wx, wy = cx * 2 + 1 + dcx, cy * 2 + 1 + dcy
+        nx, ny = cell_to_tile(ncx, ncy)
+        grid[wy][wx] = PATH
+        grid[ny][nx] = PATH
+        for ndcx, ndcy in NEIGHBOR_STEPS:
+            nncx, nncy = ncx + ndcx, ncy + ndcy
+            if 0 <= nncx < cell_cols and 0 <= nncy < cell_rows and (nncx, nncy) not in visited_rooms:
+                frontier.append((ncx, ncy, ndcx, ndcy))
+
+    entrance = cell_to_tile(0, 0)
+    exit_tile = cell_to_tile(cell_cols - 1, cell_rows - 1)
+
+    metrics = _measure(grid, entrance, exit_tile, difficulty_key)
+    return Maze(
+        grid=grid,
+        entrance=entrance,
+        exit=exit_tile,
+        difficulty_key=difficulty_key,
+        metrics=metrics,
+        pattern_cells=pattern_cells,
+        word_prompt=word,
+    )
+
+
+def _carve_pattern_maze(spec: dict, difficulty_key: str, rng: random.Random) -> Maze:
+    """第三大关/第六大关：图案秘境与提示词阵 (Opt-Maze 隐写融合算法)
+    特点：
+    1. 在迷宫正中央精准融嵌入像素图案或字母提示词阵；
     2. 将图案瓦片贯通入迷宫主通路网，四周交织普里姆九曲路与环路；
     3. 严格保证全地图 100% 连通与高长度的穿梭解法路径。
     """
     cell_cols = spec["cell_cols"]
     cell_rows = spec["cell_rows"]
-    pattern_name = spec["pattern"]
-    pattern_lines = PATTERNS.get(pattern_name, PATTERNS["star"])
+    pattern_lines = spec.get("pattern_lines")
+    if not pattern_lines:
+        pattern_name = spec.get("pattern", "star")
+        pattern_lines = PATTERNS.get(pattern_name, PATTERNS["star"])
 
     width = cell_cols * 2 + 1
     height = cell_rows * 2 + 1

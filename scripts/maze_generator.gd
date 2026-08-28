@@ -73,6 +73,164 @@ const W5_DIFFICULTIES = {
 	"10": {"cell_cols": 42, "cell_rows": 42, "woven_target": 100, "loop_ratio": 0.09, "pattern": "sword", "name": "宝剑立体极限巨阵"}
 }
 
+const W6_DIFFICULTIES = {
+	"1": {"cell_cols": 22, "cell_rows": 28, "word": "K", "loop_ratio": 0.06, "name": "字母 K - Keep 序章", "description": "KEEP GOING! 1/10"},
+	"2": {"cell_cols": 22, "cell_rows": 28, "word": "E", "loop_ratio": 0.06, "name": "字母 E - Energy 能量", "description": "KEEP GOING! 2/10"},
+	"3": {"cell_cols": 22, "cell_rows": 28, "word": "E", "loop_ratio": 0.06, "name": "字母 E - Explore 探索", "description": "KEEP GOING! 3/10"},
+	"4": {"cell_cols": 22, "cell_rows": 28, "word": "P", "loop_ratio": 0.07, "name": "字母 P - Power 力量", "description": "KEEP GOING! 4/10"},
+	"5": {"cell_cols": 24, "cell_rows": 28, "word": "G", "loop_ratio": 0.07, "name": "字母 G - Growth 生长", "description": "KEEP GOING! 5/10"},
+	"6": {"cell_cols": 24, "cell_rows": 28, "word": "O", "loop_ratio": 0.07, "name": "字母 O - Overcome 跨越", "description": "KEEP GOING! 6/10"},
+	"7": {"cell_cols": 16, "cell_rows": 28, "word": "I", "loop_ratio": 0.07, "name": "字母 I - Insight 洞察", "description": "KEEP GOING! 7/10"},
+	"8": {"cell_cols": 24, "cell_rows": 28, "word": "N", "loop_ratio": 0.08, "name": "字母 N - Never Give Up", "description": "KEEP GOING! 8/10"},
+	"9": {"cell_cols": 26, "cell_rows": 30, "word": "G", "loop_ratio": 0.08, "name": "字母 G - Glory 荣耀", "description": "KEEP GOING! 9/10"},
+	"10": {"cell_cols": 18, "cell_rows": 32, "word": "!", "loop_ratio": 0.09, "name": "感叹号 ! - 永不放弃!", "description": "KEEP GOING! 10/10"}
+}
+
+const HIGH_RES_LETTERS = {
+	"K": [
+		"**    **",
+		"**   ** ",
+		"**  **  ",
+		"*****   ",
+		"***     ",
+		"*****   ",
+		"**  **  ",
+		"**   ** ",
+		"**    **"
+	],
+	"E": [
+		"*******",
+		"**     ",
+		"**     ",
+		"*****  ",
+		"**     ",
+		"**     ",
+		"*******"
+	],
+	"P": [
+		"****** ",
+		"**   **",
+		"**   **",
+		"****** ",
+		"**     ",
+		"**     ",
+		"**     "
+	],
+	"G": [
+		" ***** ",
+		"**   **",
+		"**     ",
+		"**  ***",
+		"**   **",
+		"**   **",
+		" ***** "
+	],
+	"O": [
+		" ***** ",
+		"**   **",
+		"**   **",
+		"**   **",
+		"**   **",
+		"**   **",
+		" ***** "
+	],
+	"I": [
+		"*****",
+		" **  ",
+		" **  ",
+		" **  ",
+		" **  ",
+		" **  ",
+		"*****"
+	],
+	"N": [
+		"**    **",
+		"***   **",
+		"****  **",
+		"** ** **",
+		"**  ****",
+		"**   ***",
+		"**    **"
+	],
+	"!": [
+		"***",
+		"***",
+		"***",
+		"***",
+		"** ",
+		"   ",
+		"** ",
+		"** "
+	]
+}
+
+const PIXEL_FONT = {
+	"A": [" *** ", "*   *", "*****", "*   *", "*   *"],
+	"B": ["**** ", "*   *", "**** ", "*   *", "**** "],
+	"C": [" ****", "*    ", "*    ", "*    ", " ****"],
+	"D": ["**** ", "*   *", "*   *", "*   *", "**** "],
+	"E": ["*****", "*    ", "**** ", "*    ", "*****"],
+	"F": ["*****", "*    ", "**** ", "*    ", "*    "],
+	"G": [" ****", "*    ", "* ***", "*   *", " ****"],
+	"H": ["*   *", "*   *", "*****", "*   *", "*   *"],
+	"I": ["***", " * ", " * ", " * ", "***"],
+	"J": ["  ***", "   * ", "   * ", "*  * ", " **  "],
+	"K": ["*  *", "* * ", "**  ", "* * ", "*  *"],
+	"L": ["*    ", "*    ", "*    ", "*    ", "*****"],
+	"M": ["*   *", "** **", "* * *", "*   *", "*   *"],
+	"N": ["*   *", "**  *", "* * *", "*  **", "*   *"],
+	"O": [" *** ", "*   *", "*   *", "*   *", " *** "],
+	"P": ["**** ", "*   *", "**** ", "*    ", "*    "],
+	"Q": [" *** ", "*   *", "* * *", "*  **", " ****"],
+	"R": ["**** ", "*   *", "**** ", "*  * ", "*   *"],
+	"S": [" ****", "*    ", " *** ", "    *", "**** "],
+	"T": ["*****", "  *  ", "  *  ", "  *  ", "  *  "],
+	"U": ["*   *", "*   *", "*   *", "*   *", " *** "],
+	"V": ["*   *", "*   *", "*   *", " * * ", "  *  "],
+	"W": ["*   *", "*   *", "* * *", "** **", "*   *"],
+	"X": ["*   *", " * * ", "  *  ", " * * ", "*   *"],
+	"Y": ["*   *", " * * ", "  *  ", "  *  ", "  *  "],
+	"Z": ["*****", "   * ", "  *  ", " *   ", "*****"],
+	"0": [" *** ", "*  **", "* * *", "**  *", " *** "],
+	"1": ["  *  ", " **  ", "  *  ", "  *  ", " *** "],
+	"2": [" *** ", "*   *", "  ** ", " *   ", "*****"],
+	"3": ["**** ", "    *", " *** ", "    *", "**** "],
+	"4": ["*  * ", "*  * ", "*****", "   * ", "   * "],
+	"5": ["*****", "*    ", "**** ", "    *", "**** "],
+	"6": [" ****", "*    ", "**** ", "*   *", " *** "],
+	"7": ["*****", "   * ", "  *  ", " *   ", " *   "],
+	"8": [" *** ", "*   *", " *** ", "*   *", " *** "],
+	"9": [" *** ", "*   *", " ****", "    *", " ****"],
+	" ": ["  ", "  ", "  ", "  ", "  "]
+}
+
+static func string_to_pattern(text: String) -> Array:
+	var text_upper = text.to_upper()
+	if text_upper.length() == 1 and HIGH_RES_LETTERS.has(text_upper):
+		return HIGH_RES_LETTERS[text_upper].duplicate()
+
+	var pattern_lines = ["", "", "", "", ""]
+	for i in range(text_upper.length()):
+		var ch = text_upper[i]
+		var glyph = PIXEL_FONT.get(ch, PIXEL_FONT.get(" ", ["  ", "  ", "  ", "  ", "  "]))
+		for row in range(5):
+			pattern_lines[row] += glyph[row]
+			if i < text_upper.length() - 1:
+				pattern_lines[row] += " "
+	return pattern_lines
+
+static func get_keep_going_progress(level: int) -> String:
+	var chars = ["K", "E", "E", "P", "G", "O", "I", "N", "G", "!"]
+	var res = ""
+	for i in range(chars.size()):
+		if i == 4:
+			res += "  "
+		if i < level:
+			res += chars[i] + " "
+		else:
+			res += "_ "
+	return res.strip_edges()
+
 const PATTERNS = {
 	"star": [
 		"  *  ",
@@ -192,6 +350,7 @@ class MazeData:
 	var shape_cells: Array[Vector2i] = []
 	var overpass_cells: Array[Vector2i] = []
 	var item_tiles: Array[Vector2i] = []
+	var word_prompt: String = ""
 	var cols: int:
 		get:
 			return grid[0].size() if grid.size() > 0 else 0
@@ -234,12 +393,14 @@ class MazeData:
 		return MazeGenerator.solve_path_with_visited(grid, entrance, exit_tile)
 
 static func generate_maze(world_val: int = 1, level_val: int = 1, seed_val: int = -1) -> MazeData:
-	var w_val = clampi(world_val, 1, 5)
+	var w_val = clampi(world_val, 1, 6)
 	var l_val = clampi(level_val, 1, 10)
 	var key_str = "%d_%d" % [w_val, l_val]
 
 	var spec = W1_DIFFICULTIES[str(l_val)]
-	if w_val == 5:
+	if w_val == 6:
+		spec = W6_DIFFICULTIES[str(l_val)]
+	elif w_val == 5:
 		spec = W5_DIFFICULTIES[str(l_val)]
 	elif w_val == 4:
 		spec = W4_DIFFICULTIES[str(l_val)]
@@ -259,7 +420,10 @@ static func generate_maze(world_val: int = 1, level_val: int = 1, seed_val: int 
 
 	for i in range(attempts):
 		var maze: MazeData = null
-		if w_val == 5:
+		if w_val == 6:
+			var word = spec.get("word", "K")
+			maze = _carve_word_prompt_maze(spec, word, key_str, rng)
+		elif w_val == 5:
 			maze = _carve_woven_maze(spec, key_str, rng)
 		elif w_val == 4:
 			maze = _carve_shape_maze(spec, key_str, rng)
@@ -273,7 +437,7 @@ static func generate_maze(world_val: int = 1, level_val: int = 1, seed_val: int 
 			best = maze
 		var min_path_len = float(spec["cell_cols"] * spec["cell_rows"]) * (0.35 if w_val == 1 else 0.20)
 		if maze.metrics.path_length >= min_path_len:
-			if w_val in [2, 3, 4, 5] or maze.metrics.avg_dead_end_depth >= float(spec.get("min_dead_end_depth", 0.0)):
+			if w_val in [2, 3, 4, 5, 6] or maze.metrics.avg_dead_end_depth >= float(spec.get("min_dead_end_depth", 0.0)):
 				break
 
 	if best != null:
@@ -560,11 +724,281 @@ static func _pattern_components(pattern_rooms: Dictionary) -> Dictionary:
 			room_map[r] = comp
 	return room_map
 
+static func _get_word_stroke(word: String) -> Array[Vector2i]:
+	var word_upper = word.to_upper()
+	var strokes: Dictionary = {}
+
+	# 'K'
+	var k: Array[Vector2i] = []
+	for y in range(1, 14): k.append(Vector2i(1, y))
+	k.append(Vector2i(2, 13))
+	for y in range(12, 6, -1): k.append(Vector2i(2, y))
+	var cx = 2
+	var cy = 7
+	for i in range(5):
+		cx += 1; k.append(Vector2i(cx, cy))
+		cy -= 1; k.append(Vector2i(cx, cy))
+	cy += 1; k.append(Vector2i(cx, cy))
+	for i in range(4):
+		cx -= 1; k.append(Vector2i(cx, cy))
+		cy += 1; k.append(Vector2i(cx, cy))
+	for i in range(5):
+		cx += 1; k.append(Vector2i(cx, cy))
+		cy += 1; k.append(Vector2i(cx, cy))
+	strokes["K"] = k
+
+	# 'E'
+	var e: Array[Vector2i] = []
+	for x in range(1, 9): e.append(Vector2i(x, 1))
+	e.append(Vector2i(8, 2))
+	for x in range(7, 1, -1): e.append(Vector2i(x, 2))
+	for y in range(3, 7): e.append(Vector2i(2, y))
+	for x in range(3, 8): e.append(Vector2i(x, 6))
+	e.append(Vector2i(7, 7))
+	for x in range(6, 1, -1): e.append(Vector2i(x, 7))
+	for y in range(8, 12): e.append(Vector2i(2, y))
+	for x in range(3, 9): e.append(Vector2i(x, 11))
+	strokes["E"] = e
+
+	# 'P'
+	var p: Array[Vector2i] = []
+	for y in range(1, 14): p.append(Vector2i(1, y))
+	p.append(Vector2i(2, 13))
+	for y in range(12, 6, -1): p.append(Vector2i(2, y))
+	for x in range(3, 8): p.append(Vector2i(x, 7))
+	for y in range(6, 0, -1): p.append(Vector2i(7, y))
+	for x in range(6, 1, -1): p.append(Vector2i(x, 1))
+	strokes["P"] = p
+
+	# 'G'
+	var g: Array[Vector2i] = []
+	for x in range(8, 0, -1): g.append(Vector2i(x, 1))
+	for y in range(2, 13): g.append(Vector2i(1, y))
+	for x in range(2, 9): g.append(Vector2i(x, 12))
+	for y in range(11, 6, -1): g.append(Vector2i(8, y))
+	for x in range(7, 3, -1): g.append(Vector2i(x, 7))
+	strokes["G"] = g
+
+	# 'O'
+	var o: Array[Vector2i] = []
+	for x in range(1, 9): o.append(Vector2i(x, 1))
+	for y in range(2, 13): o.append(Vector2i(8, y))
+	for x in range(7, 0, -1): o.append(Vector2i(x, 12))
+	for y in range(11, 1, -1): o.append(Vector2i(1, y))
+	strokes["O"] = o
+
+	# 'I'
+	var i_str: Array[Vector2i] = []
+	for x in range(1, 9): i_str.append(Vector2i(x, 1))
+	for x in range(8, 3, -1): i_str.append(Vector2i(x, 2))
+	for y in range(3, 12): i_str.append(Vector2i(4, y))
+	for x in range(5, 9): i_str.append(Vector2i(x, 11))
+	for x in range(8, 0, -1): i_str.append(Vector2i(x, 12))
+	strokes["I"] = i_str
+
+	# 'N'
+	var n: Array[Vector2i] = []
+	for y in range(1, 14): n.append(Vector2i(1, y))
+	n.append(Vector2i(2, 13))
+	for y in range(12, 0, -1): n.append(Vector2i(2, y))
+	cx = 2
+	cy = 1
+	for i in range(5):
+		cx += 1; n.append(Vector2i(cx, cy))
+		cy += 1; n.append(Vector2i(cx, cy))
+		cy += 1; n.append(Vector2i(cx, cy))
+	for y in range(10, 0, -1): n.append(Vector2i(7, y))
+	strokes["N"] = n
+
+	# '!'
+	var ex: Array[Vector2i] = []
+	for y in range(1, 9): ex.append(Vector2i(1, y))
+	ex.append(Vector2i(2, 8))
+	for y in range(7, 0, -1): ex.append(Vector2i(2, y))
+	ex.append(Vector2i(3, 1))
+	for y in range(2, 12): ex.append(Vector2i(3, y))
+	ex.append(Vector2i(2, 11))
+	ex.append(Vector2i(1, 11))
+	strokes["!"] = ex
+
+	var res: Array[Vector2i] = []
+	var selected_list = strokes.get(word_upper, strokes["K"])
+	for pt in selected_list:
+		res.append(pt)
+	return res
+
+
+static func _find_stroke_connector(src: Vector2i, dst: Vector2i, stroke_set: Dictionary, cols: int, rows: int) -> Array[Vector2i]:
+	var q: Array[Vector2i] = [src]
+	var dist: Dictionary = {src: 0}
+	var parent: Dictionary = {src: null}
+
+	while q.size() > 0:
+		var min_idx = 0
+		var min_d = dist[q[0]]
+		for idx in range(1, q.size()):
+			var d_val = dist[q[idx]]
+			if d_val < min_d:
+				min_d = d_val
+				min_idx = idx
+
+		var curr = q[min_idx]
+		q.remove_at(min_idx)
+
+		if curr == dst:
+			break
+
+		var d = dist[curr]
+		for step in NEIGHBOR_STEPS:
+			var nxt = curr + step
+			if nxt.x >= 0 and nxt.x < cols and nxt.y >= 0 and nxt.y < rows:
+				var cost = 1 if (not stroke_set.has(nxt) or nxt == dst) else 1000
+				var nxt_d = d + cost
+				if not dist.has(nxt) or nxt_d < dist[nxt]:
+					dist[nxt] = nxt_d
+					parent[nxt] = curr
+					if not q.has(nxt):
+						q.append(nxt)
+
+	var res: Array[Vector2i] = []
+	var curr_node = dst
+	while curr_node != null:
+		res.append(curr_node)
+		if parent.has(curr_node):
+			curr_node = parent[curr_node]
+		else:
+			curr_node = null
+	res.reverse()
+	return res
+
+
+static func _carve_word_prompt_maze(spec: Dictionary, word: String, difficulty_key: String, rng: RandomNumberGenerator) -> MazeData:
+	var cell_cols: int = spec["cell_cols"]
+	var cell_rows: int = spec["cell_rows"]
+	var stroke_rooms = _get_word_stroke(word)
+
+	var width = cell_cols * 2 + 1
+	var height = cell_rows * 2 + 1
+
+	var grid: Array = []
+	for y in range(height):
+		var row: Array = []
+		for x in range(width):
+			row.append(WALL)
+		grid.append(row)
+
+	var max_cx = 0
+	var max_cy = 0
+	for pt in stroke_rooms:
+		max_cx = max(max_cx, pt.x)
+		max_cy = max(max_cy, pt.y)
+
+	var off_x = max(1, (cell_cols - 1 - max_cx) / 2)
+	var off_y = max(1, (cell_rows - 1 - max_cy) / 2)
+
+	var centered_stroke: Array[Vector2i] = []
+	var stroke_set: Dictionary = {}
+	for pt in stroke_rooms:
+		var cpt = Vector2i(pt.x + off_x, pt.y + off_y)
+		centered_stroke.append(cpt)
+		stroke_set[cpt] = true
+
+	var start_room = centered_stroke[0]
+	var end_room = centered_stroke[-1]
+	var target_exit = Vector2i(cell_cols - 1, cell_rows - 1)
+
+	var ent_path = _find_stroke_connector(Vector2i(0, 0), start_room, stroke_set, cell_cols, cell_rows)
+	if ent_path.size() > 0:
+		ent_path.pop_back()
+
+	var exit_path = _find_stroke_connector(end_room, target_exit, stroke_set, cell_cols, cell_rows)
+	if exit_path.size() > 0:
+		exit_path.remove_at(0)
+
+	var full_main_path_rooms: Array[Vector2i] = []
+	for pt in ent_path: full_main_path_rooms.append(pt)
+	for pt in centered_stroke: full_main_path_rooms.append(pt)
+	for pt in exit_path: full_main_path_rooms.append(pt)
+
+	var pattern_cells: Array[Vector2i] = []
+	var visited_rooms: Dictionary = {}
+
+	for i in range(full_main_path_rooms.size()):
+		var rpos = full_main_path_rooms[i]
+		var tx = rpos.x * 2 + 1
+		var ty = rpos.y * 2 + 1
+		grid[ty][tx] = PATH
+		visited_rooms[rpos] = true
+
+		if stroke_set.has(rpos):
+			if not pattern_cells.has(Vector2i(tx, ty)):
+				pattern_cells.append(Vector2i(tx, ty))
+
+		if i > 0:
+			var prpos = full_main_path_rooms[i - 1]
+			var wx = (rpos.x + prpos.x) + 1
+			var wy = (rpos.y + prpos.y) + 1
+			grid[wy][wx] = PATH
+			if stroke_set.has(rpos) and stroke_set.has(prpos):
+				if not pattern_cells.has(Vector2i(wx, wy)):
+					pattern_cells.append(Vector2i(wx, wy))
+
+	var frontier: Array = []
+	for rpos in visited_rooms.keys():
+		for step in NEIGHBOR_STEPS:
+			var npos = rpos + step
+			if npos.x >= 0 and npos.x < cell_cols and npos.y >= 0 and npos.y < cell_rows:
+				if not visited_rooms.has(npos):
+					frontier.append({"curr": rpos, "next": npos, "dir": step})
+
+	while frontier.size() > 0:
+		var idx = rng.randi() % frontier.size()
+		var item = frontier[idx]
+		frontier.remove_at(idx)
+		var cpos = item["curr"]
+		var npos = item["next"]
+		var step = item["dir"]
+
+		if visited_rooms.has(npos):
+			continue
+
+		visited_rooms[npos] = true
+		var wx = cpos.x * 2 + 1 + step.x
+		var wy = cpos.y * 2 + 1 + step.y
+		var nx = npos.x * 2 + 1
+		var ny = npos.y * 2 + 1
+
+		grid[wy][wx] = PATH
+		grid[ny][nx] = PATH
+
+		for ndir in NEIGHBOR_STEPS:
+			var nnpos = npos + ndir
+			if nnpos.x >= 0 and nnpos.x < cell_cols and nnpos.y >= 0 and nnpos.y < cell_rows:
+				if not visited_rooms.has(nnpos):
+					frontier.append({"curr": npos, "next": nnpos, "dir": ndir})
+
+	var entrance = Vector2i(1, 1)
+	var exit_tile = Vector2i(cell_cols * 2 - 1, cell_rows * 2 - 1)
+	var metrics = _measure(grid, entrance, exit_tile, difficulty_key)
+
+	var maze = MazeData.new()
+	maze.grid = grid
+	maze.entrance = entrance
+	maze.exit_tile = exit_tile
+	maze.difficulty_key = difficulty_key
+	maze.metrics = metrics
+	maze.pattern_cells = pattern_cells
+	maze.word_prompt = word
+	return maze
+
+
 static func _carve_pattern_maze(spec: Dictionary, difficulty_key: String, rng: RandomNumberGenerator) -> MazeData:
 	var cell_cols: int = spec["cell_cols"]
 	var cell_rows: int = spec["cell_rows"]
-	var pattern_name: String = spec["pattern"]
-	var pattern_lines: Array = PATTERNS.get(pattern_name, PATTERNS["star"])
+	var pattern_lines: Array = spec.get("pattern_lines", [])
+	if pattern_lines.is_empty():
+		var pattern_name: String = spec.get("pattern", "star")
+		pattern_lines = PATTERNS.get(pattern_name, PATTERNS["star"])
 
 	var width = cell_cols * 2 + 1
 	var height = cell_rows * 2 + 1
