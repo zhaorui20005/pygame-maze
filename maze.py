@@ -228,6 +228,7 @@ class Maze:
     pattern_cells: set[tuple[int, int]] = field(default_factory=set)
     shape_cells: set[tuple[int, int]] = field(default_factory=set)
     overpass_cells: set[tuple[int, int]] = field(default_factory=set)
+    item_tiles: set[tuple[int, int]] = field(default_factory=set)
 
     @property
     def cols(self) -> int:
@@ -378,7 +379,60 @@ def generate_maze(
             shape_cells=getattr(best, "shape_cells", set()),
             overpass_cells=getattr(best, "overpass_cells", set()),
         )
+    best.item_tiles = _place_items(best.grid, best.entrance, best.exit, l_val, rng)
     return best
+
+
+def _place_items(
+    grid: list[list[int]],
+    entrance: tuple[int, int],
+    exit_tile: tuple[int, int],
+    level: int,
+    rng: random.Random,
+) -> set[tuple[int, int]]:
+    """在迷宫可走路径 (PATH 瓦片) 上散落放置过关必需收集的支线道具 (每局 7 个)。
+    使用 BFS 连通性校验，绝对保证所有道具 100% 均可被玩家步行到达。
+    """
+    target_count = 7
+    dist = _bfs_distances(grid, entrance)
+    candidates: list[tuple[int, int]] = []
+    height = len(grid)
+    width = len(grid[0])
+    for y in range(height):
+        for x in range(width):
+            if grid[y][x] == PATH and (x, y) in dist:
+                if (x, y) != entrance and (x, y) != exit_tile:
+                    candidates.append((x, y))
+
+    if not candidates:
+        return set()
+
+    if len(candidates) >= target_count * 2:
+        rng.shuffle(candidates)
+        selected: list[tuple[int, int]] = []
+        for c in candidates:
+            if abs(c[0] - entrance[0]) + abs(c[1] - entrance[1]) <= 2:
+                continue
+            if abs(c[0] - exit_tile[0]) + abs(c[1] - exit_tile[1]) <= 2:
+                continue
+            too_close = False
+            for sc in selected:
+                if abs(c[0] - sc[0]) + abs(c[1] - sc[1]) <= 2:
+                    too_close = True
+                    break
+            if not too_close:
+                selected.append(c)
+                if len(selected) >= target_count:
+                    break
+        if len(selected) < target_count:
+            for c in candidates:
+                if c not in selected and c != entrance and c != exit_tile:
+                    selected.append(c)
+                    if len(selected) >= target_count:
+                        break
+        return set(selected)
+    else:
+        return set(rng.sample(candidates, min(len(candidates), target_count)))
 
 
 def _maze_quality(maze: Maze) -> tuple[int, int, float]:
@@ -569,6 +623,28 @@ def _carve_dungeon_maze(spec: dict, difficulty_key: str, rng: random.Random) -> 
     )
 
 
+def _pattern_components(pattern_rooms: set[tuple[int, int]]) -> dict[tuple[int, int], set[tuple[int, int]]]:
+    """计算图案房间的正交连通分量，按连通块管理 Prim 访问状态，防止离散像素导致孤岛。"""
+    room_map: dict[tuple[int, int], set[tuple[int, int]]] = {}
+    unvisited = set(pattern_rooms)
+    while unvisited:
+        start = next(iter(unvisited))
+        comp = {start}
+        unvisited.remove(start)
+        q = [start]
+        while q:
+            curr = q.pop()
+            for dx, dy in NEIGHBOR_STEPS:
+                nbr = (curr[0] + dx, curr[1] + dy)
+                if nbr in unvisited:
+                    unvisited.remove(nbr)
+                    comp.add(nbr)
+                    q.append(nbr)
+        for r in comp:
+            room_map[r] = comp
+    return room_map
+
+
 def _carve_pattern_maze(spec: dict, difficulty_key: str, rng: random.Random) -> Maze:
     """第三大关：图案秘境 (Opt-Maze 隐写融合算法)
     特点：
@@ -618,6 +694,8 @@ def _carve_pattern_maze(spec: dict, difficulty_key: str, rng: random.Random) -> 
                 grid[wy][wx] = PATH
                 pattern_cells.add((wx, wy))
 
+    pattern_comp_map = _pattern_components(pattern_rooms)
+
     # 2. 从起点 (0,0) 开始执行 Prim 算法生成连通生成树
     start_cx, start_cy = 0, 0
     sx, sy = cell_to_tile(start_cx, start_cy)
@@ -625,7 +703,7 @@ def _carve_pattern_maze(spec: dict, difficulty_key: str, rng: random.Random) -> 
 
     visited = {(start_cx, start_cy)}
     if (start_cx, start_cy) in pattern_rooms:
-        visited |= pattern_rooms
+        visited |= pattern_comp_map[(start_cx, start_cy)]
 
     frontier = []
     for dcx, dcy in NEIGHBOR_STEPS:
@@ -642,9 +720,10 @@ def _carve_pattern_maze(spec: dict, difficulty_key: str, rng: random.Random) -> 
             continue
 
         if (ncx, ncy) in pattern_rooms:
-            # 首次触达图案区域：打通连接入口墙，并将图案全部房间并入 visited
-            newly_visited = pattern_rooms - visited
-            visited |= pattern_rooms
+            # 首次触达图案区域连通块：打通连接入口墙，并将连通块房间并入 visited
+            comp = pattern_comp_map[(ncx, ncy)]
+            newly_visited = comp - visited
+            visited |= comp
             wall_x = cx * 2 + 1 + dcx
             wall_y = cy * 2 + 1 + dcy
             grid[wall_y][wall_x] = PATH
@@ -843,15 +922,17 @@ def _carve_woven_maze(spec: dict, difficulty_key: str, rng: random.Random) -> Ma
                     grid[wy][wx] = PATH
                     pattern_cells.add((wx, wy))
 
+    pattern_comp_map = _pattern_components(pattern_rooms)
+
     visited = {(0, 0)}
-    if pattern_rooms:
-        visited |= pattern_rooms
+    if (0, 0) in pattern_rooms:
+        visited |= pattern_comp_map[(0, 0)]
 
     sx, sy = cell_to_tile(0, 0)
     grid[sy][sx] = PATH
 
     frontier = []
-    # 初始化迷宫起点与图案四周的未访问前沿边
+    # 初始化迷宫起点的前沿边
     for init_cx, init_cy in list(visited):
         for dcx, dcy in NEIGHBOR_STEPS:
             ncx, ncy = init_cx + dcx, init_cy + dcy
@@ -866,17 +947,31 @@ def _carve_woven_maze(spec: dict, difficulty_key: str, rng: random.Random) -> Ma
         ncx, ncy = cx + dcx, cy + dcy
 
         if (ncx, ncy) not in visited:
-            visited.add((ncx, ncy))
-            wall_x = cx * 2 + 1 + dcx
-            wall_y = cy * 2 + 1 + dcy
-            nx, ny = cell_to_tile(ncx, ncy)
-            grid[wall_y][wall_x] = PATH
-            grid[ny][nx] = PATH
+            if (ncx, ncy) in pattern_rooms:
+                comp = pattern_comp_map[(ncx, ncy)]
+                newly_visited = comp - visited
+                visited |= comp
+                wall_x = cx * 2 + 1 + dcx
+                wall_y = cy * 2 + 1 + dcy
+                grid[wall_y][wall_x] = PATH
 
-            for ndcx, ndcy in NEIGHBOR_STEPS:
-                nncx, nncy = ncx + ndcx, ncy + ndcy
-                if 0 <= nncx < cell_cols and 0 <= nncy < cell_rows and (nncx, nncy) not in visited:
-                    frontier.append((ncx, ncy, ndcx, ndcy))
+                for pr_cx, pr_cy in newly_visited:
+                    for ndcx, ndcy in NEIGHBOR_STEPS:
+                        nncx, nncy = pr_cx + ndcx, pr_cy + ndcy
+                        if 0 <= nncx < cell_cols and 0 <= nncy < cell_rows and (nncx, nncy) not in visited:
+                            frontier.append((pr_cx, pr_cy, ndcx, ndcy))
+            else:
+                visited.add((ncx, ncy))
+                wall_x = cx * 2 + 1 + dcx
+                wall_y = cy * 2 + 1 + dcy
+                nx, ny = cell_to_tile(ncx, ncy)
+                grid[wall_y][wall_x] = PATH
+                grid[ny][nx] = PATH
+
+                for ndcx, ndcy in NEIGHBOR_STEPS:
+                    nncx, nncy = ncx + ndcx, ncy + ndcy
+                    if 0 <= nncx < cell_cols and 0 <= nncy < cell_rows and (nncx, nncy) not in visited:
+                        frontier.append((ncx, ncy, ndcx, ndcy))
 
         elif woven_created < woven_target:
             nncx, nncy = ncx + dcx, ncy + dcy
@@ -903,7 +998,7 @@ def _carve_woven_maze(spec: dict, difficulty_key: str, rng: random.Random) -> Ma
                     woven_created += 1
 
                     for ndcx, ndcy in NEIGHBOR_STEPS:
-                        nnncx, nnncy = nncx + ndcx, ncy + ndcy
+                        nnncx, nnncy = nncx + ndcx, nncy + ndcy
                         if 0 <= nnncx < cell_cols and 0 <= nnncy < cell_rows and (nnncx, nnncy) not in visited:
                             frontier.append((nncx, nncy, ndcx, ndcy))
 
@@ -916,19 +1011,19 @@ def _carve_woven_maze(spec: dict, difficulty_key: str, rng: random.Random) -> Ma
         tx, ty = cell_to_tile(cx, cy)
         if grid[ty][tx] == PATH:
             if grid[ty - 1][tx] in (PATH, 2, 3) and grid[ty + 1][tx] in (PATH, 2, 3) and grid[ty][tx - 1] == WALL and grid[ty][tx + 1] == WALL:
-                b_type = rng.choice([OVERPASS_NS, OVERPASS_EW])
-                grid[ty][tx] = b_type
-                grid[ty][tx - 1] = PATH
-                grid[ty][tx + 1] = PATH
-                overpass_cells.add((tx, ty))
-                woven_created += 1
+                if tx - 2 >= 0 and tx + 2 < len(grid[0]) and grid[ty][tx - 2] != WALL and grid[ty][tx + 2] != WALL:
+                    grid[ty][tx] = OVERPASS_NS
+                    grid[ty][tx - 1] = PATH
+                    grid[ty][tx + 1] = PATH
+                    overpass_cells.add((tx, ty))
+                    woven_created += 1
             elif grid[ty][tx - 1] in (PATH, 2, 3) and grid[ty][tx + 1] in (PATH, 2, 3) and grid[ty - 1][tx] == WALL and grid[ty + 1][tx] == WALL:
-                b_type = rng.choice([OVERPASS_NS, OVERPASS_EW])
-                grid[ty][tx] = b_type
-                grid[ty - 1][tx] = PATH
-                grid[ty + 1][tx] = PATH
-                overpass_cells.add((tx, ty))
-                woven_created += 1
+                if ty - 2 >= 0 and ty + 2 < len(grid) and grid[ty - 2][tx] != WALL and grid[ty + 2][tx] != WALL:
+                    grid[ty][tx] = OVERPASS_EW
+                    grid[ty - 1][tx] = PATH
+                    grid[ty + 1][tx] = PATH
+                    overpass_cells.add((tx, ty))
+                    woven_created += 1
 
     entrance = cell_to_tile(0, 0)
     exit_tile = _farthest_cell(grid, entrance, cell_cols, cell_rows)
@@ -1077,12 +1172,12 @@ def _measure(
 
 
 def assert_perfect_maze(maze: Maze) -> None:
-    """开发期自检：所有房间中心都能从入口走到，出口也可达。"""
+    """开发期自检：所有非墙房间中心都能从入口走到，出口也可达。"""
     cell_cols = (maze.cols - 1) // 2
     cell_rows = (maze.rows - 1) // 2
     dist = _bfs_distances(maze.grid, maze.entrance)
     for tile in _iter_cell_centers(cell_cols, cell_rows):
-        if tile not in dist:
+        if maze.grid[tile[1]][tile[0]] != WALL and tile not in dist:
             raise AssertionError(f"Unreachable cell {tile}")
     if maze.exit not in dist:
         raise AssertionError("Exit is unreachable")

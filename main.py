@@ -92,6 +92,7 @@ from assets import (
     create_sound_bgm_shape,
     create_sound_bgm_woven,
     create_sound_caught,
+    create_sound_item,
     create_sound_start,
     create_sound_step,
     create_sound_win,
@@ -204,9 +205,20 @@ class Camera:
         self.offset_y = HUD_HEIGHT + max(8.0, (avail_h - scaled_h) / 2.0) if avail_h > scaled_h else float(HUD_HEIGHT)
         self.following_player = False
 
-    def focus_player(self, player: Player, screen: pygame.Surface) -> None:
-        """聚焦玩家视角。"""
-        self.scale = max(1.0, self.fit_scale)
+    def focus_player(self, player: Player, screen: pygame.Surface, maze: Maze | None = None) -> None:
+        """聚焦玩家视角（地图放大跟随模式）。"""
+        if maze is not None:
+            sw, sh = screen.get_size()
+            avail_w = max(1, sw - SIDEBAR_WIDTH)
+            avail_h = max(1, sh - HUD_HEIGHT)
+            mw = maze.cols * CELL_SIZE
+            mh = maze.rows * CELL_SIZE
+            scale_w = (avail_w - 16) / mw
+            scale_h = (avail_h - 16) / mh
+            self.fit_scale = min(1.0, scale_w, scale_h)
+
+        target_render_size = 30.0  # 保持与 Level 10 同等舒适的放大渲染尺寸 (约 1.15 倍，不会使小地图过度暴涨)
+        self.scale = max(1.0, target_render_size / CELL_SIZE)
         self.following_player = True
         self.update_player_focus(player, screen)
 
@@ -222,9 +234,9 @@ class Camera:
         self.offset_y = vc_y - player.rect.centery * self.scale
 
     def toggle_view(self, maze: Maze, player: Player, screen: pygame.Surface) -> None:
-        """按 C / Space 键：在全景自适应与玩家跟随视角之间切换。"""
+        """按 C / Space / Z 键或点击侧边栏按钮：在全景还原与地图放大跟随视角之间切换。"""
         if not self.following_player:
-            self.focus_player(player, screen)
+            self.focus_player(player, screen, maze)
         else:
             self.fit_maze(maze, screen)
 
@@ -441,6 +453,7 @@ def main() -> None:
     sound_win = create_sound_win()
     sound_wolf = create_sound_wolf()
     sound_caught = create_sound_caught()
+    sound_item = create_sound_item()
 
     sound_bgm_menu = create_sound_bgm_menu()
     sound_bgm_free = create_sound_bgm_free()
@@ -471,7 +484,7 @@ def main() -> None:
     player = _spawn_player(maze)
     wolf = Wolf(CELL_SIZE)
     camera = Camera()
-    camera.fit_maze(maze, screen)
+    camera.focus_player(player, screen, maze)
     won = False
     caught_by_wolf = False
 
@@ -497,6 +510,8 @@ def main() -> None:
             sound_wolf.set_volume(vol_sfx)
         if sound_caught:
             sound_caught.set_volume(vol_sfx)
+        if sound_item:
+            sound_item.set_volume(vol_sfx)
         if sound_bgm_menu:
             sound_bgm_menu.set_volume(vol_bgm)
         if sound_bgm_free:
@@ -602,22 +617,30 @@ def main() -> None:
         last_regen_time = now
         return True
 
+    item_tiles: set[tuple[int, int]] = set()
+    total_items_count: int = 0
+    gate_locked_tip_timer: float = 0.0
+
     def reset_level_state():
         nonlocal maze, screen, player, wolf, camera, won, caught_by_wolf, timer_started, start_time_ms, current_time_sec, auto_advance_timer
         nonlocal auto_visited_order, auto_path, auto_parent_map, auto_search_idx, auto_path_idx, auto_path_phase
+        nonlocal item_tiles, total_items_count, gate_locked_tip_timer
         if not check_and_update_regen_cooldown():
             return
         maze = _make_maze(current_world, difficulty_level)
         screen = pygame.display.set_mode(_window_size(maze), pygame.RESIZABLE)
         player = _spawn_player(maze)
         wolf = Wolf(CELL_SIZE)
-        camera.fit_maze(maze, screen)
+        camera.focus_player(player, screen, maze)
         won = False
         caught_by_wolf = False
         timer_started = False
         start_time_ms = 0
         current_time_sec = 0.0
         auto_advance_timer = -1.0
+        item_tiles = set(maze.item_tiles)
+        total_items_count = len(item_tiles)
+        gate_locked_tip_timer = 0.0
 
         if show_auto_path and maze:
             auto_visited_order, auto_path, auto_parent_map = maze.solve_path_with_visited()
@@ -756,6 +779,7 @@ def main() -> None:
 
     sidebar_level_rects: dict[int, pygame.Rect] = {}
     btn_auto_path_rect: pygame.Rect | None = None
+    btn_view_rect: pygame.Rect | None = None
     running = True
     while running:
         mouse_pos = pygame.mouse.get_pos()
@@ -926,6 +950,8 @@ def main() -> None:
                 elif event.pos[0] >= screen.get_width() - SIDEBAR_WIDTH:
                     if btn_auto_path_rect and btn_auto_path_rect.collidepoint(event.pos):
                         trigger_auto_path()
+                    elif btn_view_rect and btn_view_rect.collidepoint(event.pos):
+                        camera.toggle_view(maze, player, screen)
                     else:
                         clicked_lvl = False
                         for (w, lvl), brect in sidebar_level_rects.items():
@@ -960,6 +986,7 @@ def main() -> None:
 
         # 通关/被抓后停步，但仍可按 R / 数字键 重开。
         dt = clock.get_time() / 1000.0
+        gate_locked_tip_timer = max(0.0, gate_locked_tip_timer - dt)
         if not won and not caught_by_wolf:
             keys = pygame.key.get_pressed()
 
@@ -973,6 +1000,13 @@ def main() -> None:
                 current_time_sec = (pygame.time.get_ticks() - start_time_ms) / 1000.0
 
             player.update(keys, maze, CELL_SIZE, sound_step)
+
+            # 检查玩家是否踩到支线道具格并收集
+            p_tile = (int(player.rect.centerx // CELL_SIZE), int(player.rect.centery // CELL_SIZE))
+            if p_tile in item_tiles:
+                item_tiles.remove(p_tile)
+                if sound_item:
+                    sound_item.play()
 
             # 更新大灰狼轨迹与追赶逻辑
             if wolf.active:
@@ -988,60 +1022,63 @@ def main() -> None:
                         sound_caught.play()
 
             if player.reached_exit(maze, CELL_SIZE):
-                won = True
-                if not (game_mode == "challenge" and challenge_completed):
-                    auto_advance_timer = 1.2
-                if wolf.active:
-                    wolf.crying = True
+                if len(item_tiles) == 0:
+                    won = True
+                    if not (game_mode == "challenge" and challenge_completed):
+                        auto_advance_timer = 1.2
+                    if wolf.active:
+                        wolf.crying = True
 
-                if timer_started:
-                    current_time_sec = (pygame.time.get_ticks() - start_time_ms) / 1000.0
+                    if timer_started:
+                        current_time_sec = (pygame.time.get_ticks() - start_time_ms) / 1000.0
 
-                rec_key = f"{current_world}_{difficulty_level}"
-                has_prev = rec_key in best_records
-                prev_best = best_records.get(rec_key, 999999.0)
-                is_new_record = False
+                    rec_key = f"{current_world}_{difficulty_level}"
+                    has_prev = rec_key in best_records
+                    prev_best = best_records.get(rec_key, 999999.0)
+                    is_new_record = False
 
-                if not has_prev or current_time_sec < prev_best:
-                    is_new_record = True
-                    best_records[rec_key] = current_time_sec
+                    if not has_prev or current_time_sec < prev_best:
+                        is_new_record = True
+                        best_records[rec_key] = current_time_sec
 
-                base_score = (current_world - 1) * 1000 + difficulty_level * 100
-                if is_new_record:
-                    last_round_score = base_score * 2
-                    score_doubled = True
-                else:
-                    last_round_score = base_score
-                    score_doubled = False
-
-                if game_mode == "free":
-                    total_score += last_round_score
-                    _save_best_records(
-                        best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm
-                    )
-                elif game_mode == "challenge":
-                    challenge_total_time += current_time_sec
-                    challenge_total_score += last_round_score
-                    if current_world == 5 and difficulty_level == 10:
-                        challenge_completed = True
-                        total_score += challenge_total_score
-                        if (
-                            challenge_best_time is None
-                            or challenge_total_time < challenge_best_time
-                        ):
-                            challenge_best_time = challenge_total_time
-                        if challenge_total_score > challenge_best_score:
-                            challenge_best_score = challenge_total_score
-                        _save_best_records(
-                            best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm
-                        )
+                    base_score = (current_world - 1) * 1000 + difficulty_level * 100
+                    if is_new_record:
+                        last_round_score = base_score * 2
+                        score_doubled = True
                     else:
+                        last_round_score = base_score
+                        score_doubled = False
+
+                    if game_mode == "free":
+                        total_score += last_round_score
                         _save_best_records(
                             best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm
                         )
+                    elif game_mode == "challenge":
+                        challenge_total_time += current_time_sec
+                        challenge_total_score += last_round_score
+                        if current_world == 5 and difficulty_level == 10:
+                            challenge_completed = True
+                            total_score += challenge_total_score
+                            if (
+                                challenge_best_time is None
+                                or challenge_total_time < challenge_best_time
+                            ):
+                                challenge_best_time = challenge_total_time
+                            if challenge_total_score > challenge_best_score:
+                                challenge_best_score = challenge_total_score
+                            _save_best_records(
+                                best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm
+                            )
+                        else:
+                            _save_best_records(
+                                best_records, total_score, challenge_best_time, challenge_best_score, vol_walk, vol_sfx, vol_bgm
+                            )
 
-                if sound_win:
-                    sound_win.play()
+                    if sound_win:
+                        sound_win.play()
+                else:
+                    gate_locked_tip_timer = 2.0
 
             if camera.following_player:
                 camera.update_player_focus(player, screen)
@@ -1080,7 +1117,7 @@ def main() -> None:
                     auto_path_idx = float(len(auto_path))
                     auto_path_phase = "complete"
 
-        sidebar_level_rects, btn_auto_path_rect = _draw(
+        sidebar_level_rects, btn_auto_path_rect, btn_view_rect = _draw(
             screen,
             maze,
             player,
@@ -1114,6 +1151,9 @@ def main() -> None:
             auto_path_idx,
             auto_path_phase,
             auto_advance_timer,
+            item_tiles,
+            total_items_count,
+            gate_locked_tip_timer,
         )
         pygame.display.flip()
         clock.tick(FPS)
@@ -1531,6 +1571,207 @@ def _draw_wolf_sprite(
         screen.blit(scaled_wolf, wolf_draw_rect.topleft)
 
 
+WORLD_ITEM_INFO = {
+    1: {"name": "蘑菇", "icon": "🍄", "unit": "朵"},
+    2: {"name": "肉块", "icon": "🥩", "unit": "块"},
+    3: {"name": "钥匙", "icon": "🔑", "unit": "把"},
+    4: {"name": "宝石", "icon": "💎", "unit": "颗"},
+    5: {"name": "能量核心", "icon": "⚡", "unit": "核"},
+}
+
+
+def _draw_item_icon(screen: pygame.Surface, rect: pygame.Rect, world: int, scale: float) -> None:
+    """精细绘制各世界专属收集道具 (1:蘑菇 2:肉块 3:钥匙 4:宝石 5:能量核心)"""
+    w = rect.w
+    h = rect.h
+    if w < 4 or h < 4:
+        return
+    cx, cy = rect.centerx, rect.centery
+
+    if world == 1:
+        stem_w = max(2, int(w * 0.22))
+        stem_h = max(3, int(h * 0.35))
+        stem_rect = pygame.Rect(cx - stem_w // 2, cy + int(h * 0.05), stem_w, stem_h)
+        pygame.draw.rect(screen, (240, 230, 210), stem_rect, border_radius=2)
+
+        cap_r = max(4, int(w * 0.38))
+        pygame.draw.circle(screen, (225, 45, 45), (cx, cy - int(h * 0.05)), cap_r)
+
+        dot_r = max(1, int(cap_r * 0.28))
+        pygame.draw.circle(screen, (255, 255, 255), (cx - int(cap_r * 0.4), cy - int(h * 0.12)), dot_r)
+        pygame.draw.circle(screen, (255, 255, 255), (cx + int(cap_r * 0.35), cy - int(h * 0.08)), dot_r)
+        pygame.draw.circle(screen, (255, 255, 255), (cx, cy - int(h * 0.25)), dot_r)
+
+    elif world == 2:
+        bone_w = max(3, int(w * 0.52))
+        bone_h = max(2, int(h * 0.18))
+        pygame.draw.line(screen, (240, 235, 220), (cx - bone_w // 2, cy - int(h * 0.1)), (cx + bone_w // 2, cy + int(h * 0.1)), width=bone_h)
+        pygame.draw.circle(screen, (240, 235, 220), (cx - bone_w // 2, cy - int(h * 0.1)), max(2, bone_h))
+        pygame.draw.circle(screen, (240, 235, 220), (cx + bone_w // 2, cy + int(h * 0.1)), max(2, bone_h))
+
+        meat_r = max(4, int(w * 0.32))
+        pygame.draw.circle(screen, (180, 40, 50), (cx - int(w * 0.05), cy), meat_r)
+        pygame.draw.circle(screen, (220, 90, 100), (cx - int(w * 0.05), cy), max(2, int(meat_r * 0.5)))
+
+    elif world == 3:
+        key_r = max(3, int(w * 0.22))
+        key_x = cx - int(w * 0.15)
+        key_y = cy - int(h * 0.12)
+        pygame.draw.circle(screen, (255, 215, 0), (key_x, key_y), key_r, width=max(1, int(key_r * 0.4)))
+
+        stem_len = max(5, int(w * 0.42))
+        pygame.draw.line(screen, (255, 215, 0), (key_x, key_y), (key_x + stem_len, key_y + stem_len), width=max(2, int(scale * 2.2)))
+        tx = key_x + int(stem_len * 0.7)
+        ty = key_y + int(stem_len * 0.7)
+        pygame.draw.line(screen, (255, 215, 0), (tx, ty), (tx + int(w * 0.15), ty - int(h * 0.15)), width=max(2, int(scale * 1.8)))
+
+    elif world == 4:
+        pts = [
+            (cx, cy - int(h * 0.38)),
+            (cx + int(w * 0.32), cy - int(h * 0.05)),
+            (cx, cy + int(h * 0.38)),
+            (cx - int(w * 0.32), cy - int(h * 0.05)),
+        ]
+        pygame.draw.polygon(screen, (0, 220, 255), pts)
+        pygame.draw.polygon(screen, (200, 250, 255), pts, width=1)
+        pygame.draw.line(screen, (255, 255, 255), (cx, cy - int(h * 0.38)), (cx, cy + int(h * 0.38)), width=1)
+
+    elif world == 5:
+        r_outer = max(4, int(w * 0.36))
+        pygame.draw.circle(screen, (255, 40, 160), (cx, cy), r_outer, width=max(1, int(scale * 2.0)))
+        pygame.draw.circle(screen, (0, 240, 255), (cx, cy), max(3, int(r_outer * 0.65)))
+        pygame.draw.circle(screen, (255, 255, 220), (cx, cy), max(1, int(r_outer * 0.3)))
+
+
+def _draw_minimap(
+    screen: pygame.Surface,
+    maze: Maze,
+    player: Player,
+    wolf: Wolf,
+    camera: Camera,
+    show_auto_path: bool = False,
+    auto_path: list[tuple[int, int]] | None = None,
+    auto_path_idx: float = 0.0,
+    item_tiles: set[tuple[int, int]] | None = None,
+    current_world: int = 1,
+) -> None:
+    """在地图放大跟随模式下，于迷宫视口左侧（左上角）绘制全景小地图与视口定位框"""
+    if not camera.following_player or maze is None:
+        return
+
+    screen_w, screen_h = screen.get_size()
+    maze_w = screen_w - SIDEBAR_WIDTH
+    avail_h = screen_h - HUD_HEIGHT
+
+    # 小地图最大尺寸与左上角边缘留白
+    max_mm_w = 160
+    max_mm_h = 160
+    mm_x = 16
+    mm_y = HUD_HEIGHT + 16
+
+    # 按照迷宫行列比例，等比计算小地图尺寸
+    scale_w = max_mm_w / max(1, maze.cols * CELL_SIZE)
+    scale_h = max_mm_h / max(1, maze.rows * CELL_SIZE)
+    mm_scale = min(scale_w, scale_h)
+
+    mm_w = max(70, int(maze.cols * CELL_SIZE * mm_scale))
+    mm_h = max(70, int(maze.rows * CELL_SIZE * mm_scale))
+
+    box_w = mm_w + 12
+    box_h = mm_h + 26
+    box_rect = pygame.Rect(mm_x, mm_y, box_w, box_h)
+
+    # 1. 绘制半透明精致深色框底背板
+    mm_surface = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+    mm_surface.fill((12, 18, 30, 220))
+    screen.blit(mm_surface, box_rect.topleft)
+    pygame.draw.rect(screen, (60, 140, 200), box_rect, width=2)
+
+    # 2. 标头说明文字
+    f_mm = _font(12)
+    lbl = f_mm.render("📍 小地图 (C/Space还原)", True, (200, 230, 255))
+    screen.blit(lbl, (mm_x + 8, mm_y + 4))
+
+    map_start_x = mm_x + 6
+    map_start_y = mm_y + 20
+
+    cw = mm_w / maze.cols
+    ch = mm_h / maze.rows
+
+    # 3. 绘制地图微缩点阵网格
+    for y in range(maze.rows):
+        row = maze.grid[y]
+        for x in range(maze.cols):
+            tile = row[x]
+            tx = map_start_x + x * cw
+            ty = map_start_y + y * ch
+            t_rect = pygame.Rect(int(tx), int(ty), max(1, int(math.ceil(cw))), max(1, int(math.ceil(ch))))
+            if tile == 1:
+                pygame.draw.rect(screen, (28, 38, 56), t_rect)
+            elif tile in (2, 3):
+                pygame.draw.rect(screen, (80, 110, 160), t_rect)
+            else:
+                pygame.draw.rect(screen, (45, 80, 100), t_rect)
+
+    # 起点 (树) & 终点 (小房子)
+    ent_x = map_start_x + (maze.entrance[0] + 0.5) * cw
+    ent_y = map_start_y + (maze.entrance[1] + 0.5) * ch
+    pygame.draw.circle(screen, (40, 220, 100), (int(ent_x), int(ent_y)), max(2, int(min(cw, ch) * 1.2)))
+
+    exit_x = map_start_x + (maze.exit[0] + 0.5) * cw
+    exit_y = map_start_y + (maze.exit[1] + 0.5) * ch
+    pygame.draw.circle(screen, (255, 60, 60), (int(exit_x), int(exit_y)), max(2, int(min(cw, ch) * 1.2)))
+
+    # 待收集支线道具在小地图上的发光标记点
+    if item_tiles:
+        item_color = (255, 80, 80) if current_world == 1 else ((255, 120, 140) if current_world == 2 else ((255, 215, 0) if current_world == 3 else ((0, 230, 255) if current_world == 4 else (255, 40, 200))))
+        for itx, ity in item_tiles:
+            it_x = map_start_x + (itx + 0.5) * cw
+            it_y = map_start_y + (ity + 0.5) * ch
+            pygame.draw.circle(screen, item_color, (int(it_x), int(it_y)), max(2, int(min(cw, ch) * 1.3)))
+
+    # 自动寻路线微缩轨迹
+    if show_auto_path and auto_path and int(auto_path_idx) > 0:
+        ap_pts = []
+        for tx, ty in auto_path[:int(auto_path_idx)]:
+            ap_x = map_start_x + (tx + 0.5) * cw
+            ap_y = map_start_y + (ty + 0.5) * ch
+            ap_pts.append((int(ap_x), int(ap_y)))
+        if len(ap_pts) >= 2:
+            pygame.draw.lines(screen, (255, 215, 0), False, ap_pts, width=max(1, int(min(cw, ch))))
+
+    # 追赶的大灰狼
+    if wolf.active:
+        wx_cell = wolf.x / CELL_SIZE
+        wy_cell = wolf.y / CELL_SIZE
+        w_x = map_start_x + wx_cell * cw
+        w_y = map_start_y + wy_cell * ch
+        pygame.draw.circle(screen, (255, 50, 80), (int(w_x), int(w_y)), max(3, int(min(cw, ch) * 1.5)))
+
+    # 玩家位置 (亮青色高亮发光点)
+    px_cell = player.rect.centerx / CELL_SIZE
+    py_cell = player.rect.centery / CELL_SIZE
+    p_x = map_start_x + px_cell * cw
+    p_y = map_start_y + py_cell * ch
+    p_r = max(3, int(min(cw, ch) * 1.8))
+    pygame.draw.circle(screen, (0, 255, 255), (int(p_x), int(p_y)), p_r)
+    pygame.draw.circle(screen, (255, 255, 255), (int(p_x), int(p_y)), max(1, p_r - 2))
+
+    # 4. 当前镜头视口框 (实时反映玩家屏幕所能看到的地图世界坐标)
+    min_wx = max(0.0, (0 - camera.offset_x) / camera.scale)
+    max_wx = min(maze.cols * CELL_SIZE, (maze_w - camera.offset_x) / camera.scale)
+    min_wy = max(0.0, (HUD_HEIGHT - camera.offset_y) / camera.scale)
+    max_wy = min(maze.rows * CELL_SIZE, (HUD_HEIGHT + avail_h - camera.offset_y) / camera.scale)
+
+    vx1 = map_start_x + (min_wx / CELL_SIZE) * cw
+    vy1 = map_start_y + (min_wy / CELL_SIZE) * ch
+    vx2 = map_start_x + (max_wx / CELL_SIZE) * cw
+    vy2 = map_start_y + (max_wy / CELL_SIZE) * ch
+
+    v_rect = pygame.Rect(int(vx1), int(vy1), max(4, int(vx2 - vx1)), max(4, int(vy2 - vy1)))
+    pygame.draw.rect(screen, (255, 230, 100), v_rect, width=1)
+
+
 def _draw(
     screen: pygame.Surface,
     maze: Maze,
@@ -1565,7 +1806,10 @@ def _draw(
     auto_path_idx: float = 0.0,
     auto_path_phase: str = "idle",
     auto_advance_timer: float = -1.0,
-) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect]:
+    item_tiles: set[tuple[int, int]] | None = None,
+    total_items_count: int = 0,
+    gate_locked_tip_timer: float = 0.0,
+) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect, pygame.Rect]:
     if current_world == 5:
         # 第五大关：立体立交赛博风 (深蓝地色、灰蓝墙体、天蓝高架通廊)
         cur_bg = (12, 16, 28)
@@ -1666,6 +1910,10 @@ def _draw(
                 elif is_shape and rect.w >= 4 and rect.h >= 4:
                     pygame.draw.rect(screen, (150, 240, 255), rect, width=1)
 
+                # 绘制待收集过关支线道具
+                if item_tiles and (x, y) in item_tiles:
+                    _draw_item_icon(screen, rect, current_world, scale)
+
             elif tile == 2:
                 # OVERPASS_NS: 南北高架桥，东西地下隧道
                 _draw_overpass_underpass(screen, rect, scale, cur_path, cur_wall)
@@ -1685,9 +1933,10 @@ def _draw(
                 _draw_overpass_ew_bridge_deck(screen, rect, scale, cur_wall)
 
     # 入口与出口瓦片及图案 (起点大树、终点小房子)
+    is_gate_locked = bool(item_tiles and len(item_tiles) > 0)
     for (tx, ty), color, surf in (
         (maze.entrance, COLOR_ENTRANCE, tree_surf),
-        (maze.exit, COLOR_EXIT, house_surf),
+        (maze.exit, (120, 40, 50) if is_gate_locked else COLOR_EXIT, house_surf),
     ):
         if min_tile_x <= tx <= max_tile_x and min_tile_y <= ty <= max_tile_y:
             x1, y1 = camera.world_to_screen(tx * CELL_SIZE, ty * CELL_SIZE)
@@ -1702,6 +1951,22 @@ def _draw(
             if rect.w >= 4 and rect.h >= 4:
                 scaled_surf = pygame.transform.smoothscale(surf, (rect.w, rect.h))
                 screen.blit(scaled_surf, rect.topleft)
+
+            # 出口小屋锁头 🔒 / 通关光环 🔓 绘制
+            if (tx, ty) == maze.exit and rect.w >= 6 and rect.h >= 6:
+                if is_gate_locked:
+                    lock_size = max(10, int(rect.w * 0.45))
+                    lock_rect = pygame.Rect(rect.centerx - lock_size // 2, rect.top - lock_size // 2, lock_size, lock_size)
+                    pygame.draw.rect(screen, (220, 30, 40), lock_rect, border_radius=4)
+                    pygame.draw.rect(screen, (255, 215, 0), lock_rect, width=1, border_radius=4)
+                    f_lock = _font(max(9, int(lock_size * 0.7)))
+                    t_lock = f_lock.render("🔒", True, (255, 255, 255))
+                    screen.blit(t_lock, t_lock.get_rect(center=lock_rect.center))
+                else:
+                    pygame.draw.rect(screen, (80, 255, 120), rect, width=max(2, int(scale * 3.0)))
+                    f_lock = _font(max(9, int(rect.w * 0.3)))
+                    t_lock = f_lock.render("🔓", True, (255, 255, 255))
+                    screen.blit(t_lock, t_lock.get_rect(center=(rect.centerx, rect.top)))
 
     # 1.5 如果开启自动寻路，绘制 DFS 单线探索与最终路径动画
     if show_auto_path:
@@ -1789,6 +2054,35 @@ def _draw(
     if not w_in_tunnel:
         _draw_wolf_sprite(screen, camera, wolf, wolf_sprites)
 
+    # 绘制小地图 (仅在放大模式下显示于视口左侧)
+    _draw_minimap(
+        screen,
+        maze,
+        player,
+        wolf,
+        camera,
+        show_auto_path,
+        auto_path,
+        auto_path_idx,
+        item_tiles,
+        current_world,
+    )
+
+    # 如果尝试未集齐道具进门，绘制醒目的顶部上锁警示横幅
+    if gate_locked_tip_timer > 0.0 and item_tiles:
+        item_info = WORLD_ITEM_INFO.get(current_world, WORLD_ITEM_INFO[1])
+        rem_c = len(item_tiles)
+        col_c = max(0, total_items_count - rem_c)
+        tip_str = f"🔒 大门未开启！需集齐 7 个 {item_info['icon']}{item_info['name']} (已收集 {col_c} 个，还有 {rem_c} 个未收集)"
+        f_tip = _font(15)
+        tip_surf = f_tip.render(tip_str, True, (255, 235, 120))
+        bg_w = tip_surf.get_width() + 28
+        bg_h = 32
+        bg_rect = pygame.Rect((maze_w - bg_w) // 2, HUD_HEIGHT + 10, bg_w, bg_h)
+        pygame.draw.rect(screen, (160, 20, 35), bg_rect, border_radius=6)
+        pygame.draw.rect(screen, (255, 215, 0), bg_rect, width=2, border_radius=6)
+        screen.blit(tip_surf, tip_surf.get_rect(center=bg_rect.center))
+
     # 2. 绘制顶部 HUD 栏
     pygame.draw.rect(screen, (14, 18, 28), (0, 0, maze_w, HUD_HEIGHT))
     pygame.draw.line(screen, (38, 52, 74), (0, HUD_HEIGHT), (maze_w, HUD_HEIGHT), 1)
@@ -1823,6 +2117,9 @@ def _draw(
         auto_path_idx,
         auto_path_phase,
         auto_advance_timer,
+        camera,
+        item_tiles,
+        total_items_count,
     )
 
 
@@ -1851,7 +2148,10 @@ def _draw_sidebar(
     auto_path_idx: float = 0.0,
     auto_path_phase: str = "idle",
     auto_advance_timer: float = -1.0,
-) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect]:
+    camera: Camera | None = None,
+    item_tiles: set[tuple[int, int]] | None = None,
+    total_items_count: int = 0,
+) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect, pygame.Rect]:
     """右侧独立记分牌面板：包含总得分、关卡分值、调试选关按钮、计时纪录与提示卡片。"""
     sw, sh = screen.get_size()
     sb_x = sw - SIDEBAR_WIDTH
@@ -1937,6 +2237,27 @@ def _draw_sidebar(
     screen.blit(t_pts, (pad_x + 10, cur_y + 60))
 
     cur_y += 100
+
+    # --- 卡片 2.5: 🎒 支线任务道具收集 (Item Quest Card) ---
+    c_item_rect = pygame.Rect(pad_x, cur_y, card_w, 66)
+    pygame.draw.rect(screen, (24, 34, 52), c_item_rect, border_radius=8)
+    pygame.draw.rect(screen, (48, 68, 98), c_item_rect, width=1, border_radius=8)
+
+    item_info = WORLD_ITEM_INFO.get(current_world, WORLD_ITEM_INFO[1])
+    rem_count = len(item_tiles) if item_tiles is not None else 0
+    col_count = max(0, total_items_count - rem_count)
+
+    if rem_count == 0:
+        t_q_title = f_title.render(f"🎒 支线: {item_info['icon']}{item_info['name']} (已集齐 7 个!)", True, (100, 255, 150))
+        t_q_status = f_small.render(f"已收集: {col_count} 个 | 还有 0 个未收集 (🔓 门已解封)", True, (150, 255, 180))
+    else:
+        t_q_title = f_title.render(f"🎒 支线: {item_info['icon']}{item_info['name']} 收集 ({col_count}/{total_items_count})", True, (255, 220, 90))
+        t_q_status = f_small.render(f"已收集: {col_count} 个 | 还有 {rem_count} 个未收集", True, (255, 200, 120))
+
+    screen.blit(t_q_title, (pad_x + 10, cur_y + 8))
+    screen.blit(t_q_status, (pad_x + 10, cur_y + 36))
+
+    cur_y += 74
 
     # --- 卡片 3: 🎯 调试选关按钮 (Level Select Card - 50 关) ---
     c3_rect = pygame.Rect(pad_x, cur_y, card_w, 168)
@@ -2069,6 +2390,25 @@ def _draw_sidebar(
     pygame.draw.rect(screen, border_a, btn_auto_rect, width=2 if (hover_auto or show_auto_path) else 1, border_radius=6)
     screen.blit(txt_a, txt_a.get_rect(center=btn_auto_rect.center))
 
+    cur_y += 36
+
+    # --- 🔍 视角模式切换按钮 ---
+    btn_view_rect = pygame.Rect(pad_x, cur_y, card_w, 30)
+    hover_view = btn_view_rect.collidepoint(pygame.mouse.get_pos())
+    is_following = camera.following_player if camera is not None else False
+    if is_following:
+        bg_v = (20, 80, 70) if hover_view else (15, 60, 52)
+        border_v = (0, 240, 200)
+        txt_v = font.render("🔍 视角: 地图放大 [点击还原全景]", True, (200, 250, 240))
+    else:
+        bg_v = (38, 52, 74) if hover_view else (24, 34, 52)
+        border_v = (100, 180, 255) if hover_view else (48, 68, 98)
+        txt_v = font.render("🔍 视角: 全景还原 [点击放大跟随]", True, (220, 235, 245))
+
+    pygame.draw.rect(screen, bg_v, btn_view_rect, border_radius=6)
+    pygame.draw.rect(screen, border_v, btn_view_rect, width=2 if (hover_view or is_following) else 1, border_radius=6)
+    screen.blit(txt_v, txt_v.get_rect(center=btn_view_rect.center))
+
     cur_y += 38
 
     # --- 卡片 4: ⏱️ 计时 & 纪录 (Timer & Record) ---
@@ -2199,7 +2539,7 @@ def _draw_sidebar(
         screen.blit(t_l, (pad_x + 10, cur_y + 28 + i * 19))
         screen.blit(t_l, (pad_x + 10, cur_y + 28 + i * 20))
 
-    return sidebar_level_rects, btn_auto_rect
+    return sidebar_level_rects, btn_auto_rect, btn_view_rect
 
 
 if __name__ == "__main__":

@@ -191,6 +191,7 @@ class MazeData:
 	var pattern_cells: Array[Vector2i] = []
 	var shape_cells: Array[Vector2i] = []
 	var overpass_cells: Array[Vector2i] = []
+	var item_tiles: Array[Vector2i] = []
 	var cols: int:
 		get:
 			return grid[0].size() if grid.size() > 0 else 0
@@ -275,12 +276,67 @@ static func generate_maze(world_val: int = 1, level_val: int = 1, seed_val: int 
 			if w_val in [2, 3, 4, 5] or maze.metrics.avg_dead_end_depth >= float(spec.get("min_dead_end_depth", 0.0)):
 				break
 
-	if best != null and w_val in [2, 3, 4]:
-		var loop_ratio = float(spec.get("loop_ratio", 0.04 if w_val == 2 else 0.06))
-		_add_guarded_braid_loops(best.grid, best.entrance, best.exit_tile, loop_ratio, rng)
-		best.metrics = _measure(best.grid, best.entrance, best.exit_tile, key_str)
+	if best != null:
+		if w_val in [2, 3, 4]:
+			var loop_ratio = float(spec.get("loop_ratio", 0.04 if w_val == 2 else 0.06))
+			_add_guarded_braid_loops(best.grid, best.entrance, best.exit_tile, loop_ratio, rng)
+			best.metrics = _measure(best.grid, best.entrance, best.exit_tile, key_str)
+		best.item_tiles = _place_items(best.grid, best.entrance, best.exit_tile, l_val, rng)
 
 	return best
+
+static func _place_items(grid: Array, entrance: Vector2i, exit_tile: Vector2i, level: int, rng: RandomNumberGenerator) -> Array[Vector2i]:
+	var target_count = 7
+	var dist = _bfs_distances(grid, entrance)
+	var candidates: Array[Vector2i] = []
+	var height = grid.size()
+	var width = grid[0].size()
+	for y in range(height):
+		for x in range(width):
+			if grid[y][x] == PATH:
+				var pos = Vector2i(x, y)
+				if dist.has(pos) and pos != entrance and pos != exit_tile:
+					candidates.append(pos)
+
+	if candidates.size() == 0:
+		return []
+
+	if candidates.size() >= target_count * 2:
+		for i in range(candidates.size() - 1, 0, -1):
+			var j = rng.randi() % (i + 1)
+			var tmp = candidates[i]
+			candidates[i] = candidates[j]
+			candidates[j] = tmp
+
+		var selected: Array[Vector2i] = []
+		for c in candidates:
+			if abs(c.x - entrance.x) + abs(c.y - entrance.y) <= 2:
+				continue
+			if abs(c.x - exit_tile.x) + abs(c.y - exit_tile.y) <= 2:
+				continue
+			var too_close = false
+			for sc in selected:
+				if abs(c.x - sc.x) + abs(c.y - sc.y) <= 2:
+					too_close = true
+					break
+			if not too_close:
+				selected.append(c)
+				if selected.size() >= target_count:
+					break
+
+		if selected.size() < target_count:
+			for c in candidates:
+				if not selected.has(c) and c != entrance and c != exit_tile:
+					selected.append(c)
+					if selected.size() >= target_count:
+						break
+		return selected
+	else:
+		var selected: Array[Vector2i] = []
+		var count = min(candidates.size(), target_count)
+		for i in range(count):
+			selected.append(candidates[i])
+		return selected
 
 static func _maze_quality(maze: MazeData) -> Array:
 	var m = maze.metrics
@@ -484,6 +540,26 @@ static func _carve_dungeon_maze(spec: Dictionary, difficulty_key: String, rng: R
 	maze.metrics = metrics
 	return maze
 
+static func _pattern_components(pattern_rooms: Dictionary) -> Dictionary:
+	var room_map: Dictionary = {}
+	var unvisited: Array = pattern_rooms.keys()
+	while unvisited.size() > 0:
+		var start_pos = unvisited[0]
+		var comp: Array = [start_pos]
+		unvisited.erase(start_pos)
+		var q: Array = [start_pos]
+		while q.size() > 0:
+			var curr = q.pop_back()
+			for step in NEIGHBOR_STEPS:
+				var nbr = curr + step
+				if unvisited.has(nbr):
+					unvisited.erase(nbr)
+					comp.append(nbr)
+					q.append(nbr)
+		for r in comp:
+			room_map[r] = comp
+	return room_map
+
 static func _carve_pattern_maze(spec: Dictionary, difficulty_key: String, rng: RandomNumberGenerator) -> MazeData:
 	var cell_cols: int = spec["cell_cols"]
 	var cell_rows: int = spec["cell_rows"]
@@ -536,6 +612,8 @@ static func _carve_pattern_maze(spec: Dictionary, difficulty_key: String, rng: R
 				grid[wy][wx] = PATH
 				pattern_cells.append(Vector2i(wx, wy))
 
+	var pattern_comp_map = _pattern_components(pattern_rooms)
+
 	# 2. 从起点 (0,0) 开始执行 Prim 算法生成连通生成树
 	var start_cell = Vector2i(0, 0)
 	var sx = start_cell.x * 2 + 1
@@ -545,7 +623,8 @@ static func _carve_pattern_maze(spec: Dictionary, difficulty_key: String, rng: R
 	var visited: Dictionary = {}
 	visited[start_cell] = true
 	if pattern_rooms.has(start_cell):
-		for prpos in pattern_rooms.keys():
+		var comp = pattern_comp_map[start_cell]
+		for prpos in comp:
 			visited[prpos] = true
 
 	var frontier: Array = []
@@ -568,8 +647,9 @@ static func _carve_pattern_maze(spec: Dictionary, difficulty_key: String, rng: R
 		var step = item["dir"]
 
 		if pattern_rooms.has(ncell):
+			var comp = pattern_comp_map[ncell]
 			var newly_visited = []
-			for prpos in pattern_rooms.keys():
+			for prpos in comp:
 				if not visited.has(prpos):
 					newly_visited.append(prpos)
 					visited[prpos] = true
@@ -788,9 +868,13 @@ static func _carve_woven_maze(spec: Dictionary, difficulty_key: String, rng: Ran
 					grid[wy][wx] = PATH
 					pattern_cells.append(Vector2i(wx, wy))
 
+	var pattern_comp_map = _pattern_components(pattern_rooms)
+
 	var visited: Dictionary = {Vector2i(0, 0): true}
-	for pr in pattern_rooms.keys():
-		visited[pr] = true
+	if pattern_rooms.has(Vector2i(0, 0)):
+		var comp = pattern_comp_map[Vector2i(0, 0)]
+		for prpos in comp:
+			visited[prpos] = true
 
 	var sx = 1
 	var sy = 1
@@ -815,19 +899,37 @@ static func _carve_woven_maze(spec: Dictionary, difficulty_key: String, rng: Ran
 		var ncell: Vector2i = item["to"]
 
 		if not visited.has(ncell):
-			visited[ncell] = true
-			var wall_x = from_cell.x * 2 + 1 + step.x
-			var wall_y = from_cell.y * 2 + 1 + step.y
-			var nx = ncell.x * 2 + 1
-			var ny = ncell.y * 2 + 1
+			if pattern_rooms.has(ncell):
+				var comp = pattern_comp_map[ncell]
+				var newly_visited = []
+				for prpos in comp:
+					if not visited.has(prpos):
+						newly_visited.append(prpos)
+						visited[prpos] = true
 
-			grid[wall_y][wall_x] = PATH
-			grid[ny][nx] = PATH
+				var wall_x = from_cell.x * 2 + 1 + step.x
+				var wall_y = from_cell.y * 2 + 1 + step.y
+				grid[wall_y][wall_x] = PATH
 
-			for nstep in NEIGHBOR_STEPS:
-				var nncell = ncell + nstep
-				if nncell.x >= 0 and nncell.x < cell_cols and nncell.y >= 0 and nncell.y < cell_rows and not visited.has(nncell):
-					frontier.append({"from": ncell, "dir": nstep, "to": nncell})
+				for prpos in newly_visited:
+					for nstep in NEIGHBOR_STEPS:
+						var nncell = prpos + nstep
+						if nncell.x >= 0 and nncell.x < cell_cols and nncell.y >= 0 and nncell.y < cell_rows and not visited.has(nncell):
+							frontier.append({"from": prpos, "dir": nstep, "to": nncell})
+			else:
+				visited[ncell] = true
+				var wall_x = from_cell.x * 2 + 1 + step.x
+				var wall_y = from_cell.y * 2 + 1 + step.y
+				var nx = ncell.x * 2 + 1
+				var ny = ncell.y * 2 + 1
+
+				grid[wall_y][wall_x] = PATH
+				grid[ny][nx] = PATH
+
+				for nstep in NEIGHBOR_STEPS:
+					var nncell = ncell + nstep
+					if nncell.x >= 0 and nncell.x < cell_cols and nncell.y >= 0 and nncell.y < cell_rows and not visited.has(nncell):
+						frontier.append({"from": ncell, "dir": nstep, "to": nncell})
 
 		elif woven_created < woven_target:
 			var nncell = ncell + step
@@ -879,19 +981,19 @@ static func _carve_woven_maze(spec: Dictionary, difficulty_key: String, rng: Ran
 		var ty = room.y * 2 + 1
 		if grid[ty][tx] == PATH:
 			if (grid[ty - 1][tx] == PATH or grid[ty - 1][tx] == 2 or grid[ty - 1][tx] == 3) and (grid[ty + 1][tx] == PATH or grid[ty + 1][tx] == 2 or grid[ty + 1][tx] == 3) and grid[ty][tx - 1] == WALL and grid[ty][tx + 1] == WALL:
-				var b_type = OVERPASS_NS if rng.randf() < 0.5 else OVERPASS_EW
-				grid[ty][tx] = b_type
-				grid[ty][tx - 1] = PATH
-				grid[ty][tx + 1] = PATH
-				overpass_cells.append(Vector2i(tx, ty))
-				woven_created += 1
+				if tx - 2 >= 0 and tx + 2 < grid[0].size() and grid[ty][tx - 2] != WALL and grid[ty][tx + 2] != WALL:
+					grid[ty][tx] = OVERPASS_NS
+					grid[ty][tx - 1] = PATH
+					grid[ty][tx + 1] = PATH
+					overpass_cells.append(Vector2i(tx, ty))
+					woven_created += 1
 			elif (grid[ty][tx - 1] == PATH or grid[ty][tx - 1] == 2 or grid[ty][tx - 1] == 3) and (grid[ty][tx + 1] == PATH or grid[ty][tx + 1] == 2 or grid[ty][tx + 1] == 3) and grid[ty - 1][tx] == WALL and grid[ty + 1][tx] == WALL:
-				var b_type = OVERPASS_NS if rng.randf() < 0.5 else OVERPASS_EW
-				grid[ty][tx] = b_type
-				grid[ty - 1][tx] = PATH
-				grid[ty + 1][tx] = PATH
-				overpass_cells.append(Vector2i(tx, ty))
-				woven_created += 1
+				if ty - 2 >= 0 and ty + 2 < grid.size() and grid[ty - 2][tx] != WALL and grid[ty + 2][tx] != WALL:
+					grid[ty][tx] = OVERPASS_EW
+					grid[ty - 1][tx] = PATH
+					grid[ty + 1][tx] = PATH
+					overpass_cells.append(Vector2i(tx, ty))
+					woven_created += 1
 
 	var entrance = Vector2i(sx, sy)
 	var exit_tile = _farthest_cell(grid, entrance, cell_cols, cell_rows)

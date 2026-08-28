@@ -72,6 +72,35 @@ def create_sound_step(sample_rate: int = 22050) -> pygame.mixer.Sound | None:
         return None
 
 
+def create_sound_item(sample_rate: int = 22050) -> pygame.mixer.Sound | None:
+    """生成拾取道具/吃宝物的清脆 8-bit 双连音效 (E6 -> A6)。"""
+    try:
+        duration = 0.15
+        num_samples = int(sample_rate * duration)
+        samples = []
+        notes = [(0.0, 0.07, 1318.5), (0.07, 0.15, 1760.0)]
+        for i in range(num_samples):
+            t = i / sample_rate
+            val = 0.0
+            for st, ed, freq in notes:
+                if st <= t < ed:
+                    local_t = t - st
+                    dur = ed - st
+                    env = math.sin(math.pi * (local_t / dur)) ** 0.6
+                    sine = math.sin(2.0 * math.pi * freq * local_t)
+                    square = 0.4 if sine >= 0 else -0.4
+                    val = (sine * 0.5 + square * 0.5) * env * 0.45
+                    break
+            samples.append(val)
+
+        wav_bytes = _generate_wav_bytes(samples, sample_rate)
+        import io
+        return pygame.mixer.Sound(io.BytesIO(wav_bytes))
+    except Exception as e:
+        print(f"Warning: Failed to create item sound: {e}")
+        return None
+
+
 def create_sound_start(sample_rate: int = 22050) -> pygame.mixer.Sound | None:
     """生成新一局开始/重随的开场三连音 (Upward Arpeggio C5-E5-G5)。"""
     try:

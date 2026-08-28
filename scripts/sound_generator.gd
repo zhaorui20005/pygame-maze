@@ -26,6 +26,40 @@ static func create_sound_step(sample_rate: int = 22050) -> AudioStreamWAV:
 	stream.data = pcm_bytes
 	return stream
 
+static func create_sound_item(sample_rate: int = 22050) -> AudioStreamWAV:
+	var duration = 0.15
+	var num_samples = int(sample_rate * duration)
+	var pcm_bytes = PackedByteArray()
+	pcm_bytes.resize(num_samples * 2)
+	var notes = [
+		{"st": 0.0, "ed": 0.07, "freq": 1318.5},
+		{"st": 0.07, "ed": 0.15, "freq": 1760.0}
+	]
+
+	for i in range(num_samples):
+		var t = float(i) / sample_rate
+		var val = 0.0
+		for note in notes:
+			if t >= note["st"] and t < note["ed"]:
+				var local_t = t - note["st"]
+				var dur = note["ed"] - note["st"]
+				var env = pow(sin(PI * (local_t / dur)), 0.6)
+				var sine = sin(2.0 * PI * note["freq"] * local_t)
+				var square = 0.4 if sine >= 0 else -0.4
+				val = (sine * 0.5 + square * 0.5) * env * 0.45
+				break
+
+		var clamped = clamp(val, -1.0, 1.0)
+		var int_val = int(clamped * 32767.0)
+		pcm_bytes.encode_s16(i * 2, int_val)
+
+	var stream = AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = sample_rate
+	stream.stereo = false
+	stream.data = pcm_bytes
+	return stream
+
 static func create_sound_start(sample_rate: int = 22050) -> AudioStreamWAV:
 	var duration = 0.22
 	var num_samples = int(sample_rate * duration)

@@ -77,6 +77,19 @@ var challenge_completed: bool = false
 var challenge_best_time: float = -1.0
 var challenge_best_score: int = 0
 
+const WORLD_ITEM_INFO = {
+	1: {"name": "蘑菇", "icon": "🍄", "unit": "朵"},
+	2: {"name": "肉块", "icon": "🥩", "unit": "块"},
+	3: {"name": "钥匙", "icon": "🔑", "unit": "把"},
+	4: {"name": "宝石", "icon": "💎", "unit": "颗"},
+	5: {"name": "能量核心", "icon": "⚡", "unit": "核"}
+}
+
+var item_tiles: Array[Vector2i] = []
+var total_items_count: int = 0
+var gate_locked_tip_timer: float = 0.0
+var audio_item_player: AudioStreamPlayer = null
+
 var timer_started: bool = false
 var start_time_msec: int = 0
 var current_time_sec: float = 0.0
@@ -94,6 +107,7 @@ var auto_search_idx: float = 0.0
 var auto_path_idx: float = 0.0
 var auto_path_phase: String = "idle" # "idle", "search", "path", "complete"
 var sidebar_btn_auto: Button = null
+var sidebar_btn_view: Button = null
 
 # UI Label
 @onready var hud_label: Label = $CanvasLayer/HUDMargin/HUDLabel
@@ -176,6 +190,10 @@ func _ready() -> void:
 	audio_caught_player = AudioStreamPlayer.new()
 	audio_caught_player.stream = SoundGenerator.create_sound_caught()
 	add_child(audio_caught_player)
+
+	audio_item_player = AudioStreamPlayer.new()
+	audio_item_player.stream = SoundGenerator.create_sound_item()
+	add_child(audio_item_player)
 
 	audio_bgm_menu_player = AudioStreamPlayer.new()
 	audio_bgm_menu_player.stream = SoundGenerator.create_sound_bgm_menu()
@@ -359,6 +377,21 @@ func _setup_sidebar_level_select_buttons() -> void:
 	parent_vbox.add_child(btn_auto)
 	sidebar_btn_auto = btn_auto
 
+	var btn_view = Button.new()
+	btn_view.text = "🔍 视角: 放大跟随 [点击还原全景]"
+	btn_view.custom_minimum_size = Vector2(210, 26)
+	btn_view.add_theme_font_size_override("font_size", 12)
+	btn_view.pressed.connect(func():
+		if not following_player:
+			focus_player()
+		else:
+			fit_to_screen()
+		_update_view_btn_text()
+		queue_redraw()
+	)
+	parent_vbox.add_child(btn_view)
+	sidebar_btn_view = btn_view
+
 func trigger_auto_path() -> void:
 	show_auto_path = not show_auto_path
 	if show_auto_path and maze_data != null:
@@ -375,19 +408,27 @@ func trigger_auto_path() -> void:
 	queue_redraw()
 
 func _update_auto_btn_text() -> void:
-	if sidebar_btn_auto == null:
-		return
-	if show_auto_path:
-		if auto_path_phase == "search":
-			var progress = int(float(auto_search_idx) / max(1, auto_visited_order.size()) * 100.0)
-			sidebar_btn_auto.text = "🧭 算法探索中... (%d%%)" % progress
-		elif auto_path_phase == "path":
-			var progress = int(float(auto_path_idx) / max(1, auto_path.size()) * 100.0)
-			sidebar_btn_auto.text = "🧭 生成路线中... (%d%%)" % progress
+	if sidebar_btn_auto != null:
+		if show_auto_path:
+			if auto_path_phase == "search":
+				var progress = int(float(auto_search_idx) / max(1, auto_visited_order.size()) * 100.0)
+				sidebar_btn_auto.text = "🧭 算法探索中... (%d%%)" % progress
+			elif auto_path_phase == "path":
+				var progress = int(float(auto_path_idx) / max(1, auto_path.size()) * 100.0)
+				sidebar_btn_auto.text = "🧭 生成路线中... (%d%%)" % progress
+			else:
+				sidebar_btn_auto.text = "🧭 自动寻路：已开启"
 		else:
-			sidebar_btn_auto.text = "🧭 自动寻路：已开启"
+			sidebar_btn_auto.text = "🧭 自动寻路：已关闭 [点击演示]"
+	_update_view_btn_text()
+
+func _update_view_btn_text() -> void:
+	if sidebar_btn_view == null:
+		return
+	if following_player:
+		sidebar_btn_view.text = "🔍 视角: 放大跟随 [点击还原全景]"
 	else:
-		sidebar_btn_auto.text = "🧭 自动寻路：已关闭 [点击演示]"
+		sidebar_btn_view.text = "🔍 视角: 全景还原 [点击放大跟随]"
 
 func _lin_to_db(v: float) -> float:
 	if v <= 0.001:
@@ -426,6 +467,7 @@ func _apply_volumes() -> void:
 	if audio_win_player != null: audio_win_player.volume_db = _lin_to_db(vol_sfx)
 	if audio_wolf_player != null: audio_wolf_player.volume_db = _lin_to_db(vol_sfx)
 	if audio_caught_player != null: audio_caught_player.volume_db = _lin_to_db(vol_sfx)
+	if audio_item_player != null: audio_item_player.volume_db = _lin_to_db(vol_sfx)
 	if audio_bgm_menu_player != null: audio_bgm_menu_player.volume_db = db_bgm
 	if audio_bgm_free_player != null: audio_bgm_free_player.volume_db = db_bgm
 	if audio_bgm_challenge_player != null: audio_bgm_challenge_player.volume_db = db_bgm
@@ -469,6 +511,13 @@ func _start_new_game(world: int = 1, level: int = 1) -> void:
 		audio_start_player.play()
 
 	maze_data = MazeGenerator.generate_maze(current_world, difficulty_level)
+	if maze_data != null:
+		item_tiles = maze_data.item_tiles.duplicate()
+		total_items_count = item_tiles.size()
+	else:
+		item_tiles.clear()
+		total_items_count = 0
+	gate_locked_tip_timer = 0.0
 	if show_auto_path and maze_data != null:
 		var res = maze_data.solve_path_with_visited()
 		auto_visited_order = res["visited_order"]
@@ -493,7 +542,7 @@ func _start_new_game(world: int = 1, level: int = 1) -> void:
 	)
 	player.init_player(start_pixel, CELL_SIZE - 12.0)
 
-	fit_to_screen()
+	focus_player()
 	_update_hud()
 	queue_redraw()
 
@@ -501,25 +550,36 @@ func fit_to_screen() -> void:
 	if maze_data == null:
 		return
 	var win_size = get_viewport_rect().size
-	var avail_w = max(1.0, win_size.x - SIDEBAR_WIDTH)
-	var avail_h = max(1.0, win_size.y - HUD_HEIGHT)
+	var avail_w = maxf(1.0, win_size.x - SIDEBAR_WIDTH)
+	var avail_h = maxf(1.0, win_size.y - HUD_HEIGHT)
 	var mw = maze_data.cols * CELL_SIZE
 	var mh = maze_data.rows * CELL_SIZE
 
 	var scale_w = (avail_w - 16.0) / mw
 	var scale_h = (avail_h - 16.0) / mh
-	fit_scale = min(1.0, min(scale_w, scale_h))
+	fit_scale = minf(1.0, minf(scale_w, scale_h))
 	camera_scale = fit_scale
 
 	var scaled_w = mw * camera_scale
 	var scaled_h = mh * camera_scale
 
-	offset_pos.x = max(8.0, (avail_w - scaled_w) / 2.0)
-	offset_pos.y = HUD_HEIGHT + max(8.0, (avail_h - scaled_h) / 2.0) if avail_h > scaled_h else HUD_HEIGHT
+	offset_pos.x = maxf(8.0, (avail_w - scaled_w) / 2.0)
+	offset_pos.y = HUD_HEIGHT + maxf(8.0, (avail_h - scaled_h) / 2.0) if avail_h > scaled_h else HUD_HEIGHT
 	following_player = false
 
 func focus_player() -> void:
-	camera_scale = max(1.0, fit_scale)
+	if maze_data != null:
+		var win_size = get_viewport_rect().size
+		var avail_w = maxf(1.0, win_size.x - SIDEBAR_WIDTH)
+		var avail_h = maxf(1.0, win_size.y - HUD_HEIGHT)
+		var mw = maze_data.cols * CELL_SIZE
+		var mh = maze_data.rows * CELL_SIZE
+		var scale_w = (avail_w - 16.0) / mw
+		var scale_h = (avail_h - 16.0) / mh
+		fit_scale = minf(1.0, minf(scale_w, scale_h))
+
+	var target_render_size = 30.0 # 保持与 Level 10 同等舒适的放大渲染尺寸 (约 1.15 倍)
+	camera_scale = maxf(1.0, target_render_size / CELL_SIZE)
 	following_player = true
 	_update_player_focus()
 
@@ -776,11 +836,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_ESCAPE or event.keycode == KEY_M:
 			_return_to_main_menu()
-		elif event.keycode == KEY_C:
+		elif event.keycode == KEY_C or event.keycode == KEY_Z:
 			if not following_player:
 				focus_player()
 			else:
 				fit_to_screen()
+			_update_view_btn_text()
 			queue_redraw()
 		elif event.keycode == KEY_SPACE or event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
 			if won:
@@ -794,6 +855,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					focus_player()
 				else:
 					fit_to_screen()
+				_update_view_btn_text()
 				queue_redraw()
 		elif (event.keycode >= KEY_1 and event.keycode <= KEY_9) and game_mode == "free":
 			_start_new_game(current_world, event.keycode - KEY_1 + 1)
@@ -908,6 +970,10 @@ func _physics_process(delta: float) -> void:
 			_update_auto_btn_text()
 			queue_redraw()
 
+	if gate_locked_tip_timer > 0.0:
+		gate_locked_tip_timer = maxf(0.0, gate_locked_tip_timer - delta)
+		queue_redraw()
+
 	if not won and not caught_by_wolf and maze_data != null:
 		# 玩家按下方向键后开始按精确到 0.01 秒计时
 		if not timer_started:
@@ -921,9 +987,19 @@ func _physics_process(delta: float) -> void:
 
 		player.process_movement(delta, maze_data, CELL_SIZE)
 
+		# 检查玩家是否踩到支线道具格
+		var p_center = player.pixel_position + Vector2(player.size * 0.5, player.size * 0.5)
+		var p_tile = Vector2i(int(p_center.x / CELL_SIZE), int(p_center.y / CELL_SIZE))
+		var item_idx = item_tiles.find(p_tile)
+		if item_idx != -1:
+			item_tiles.remove_at(item_idx)
+			if audio_item_player != null:
+				audio_item_player.play()
+			_update_hud()
+			queue_redraw()
+
 		# 大灰狼追赶与轨迹追踪逻辑
 		if wolf_active:
-			var p_center = player.pixel_position + Vector2(player.size / 2.0, player.size / 2.0)
 			if wolf_trail.size() == 0 or wolf_trail[-1].distance_to(p_center) >= 8.0:
 				wolf_trail.append(p_center)
 
@@ -961,53 +1037,58 @@ func _physics_process(delta: float) -> void:
 					audio_caught_player.play()
 
 		if player.check_reached_exit(maze_data, CELL_SIZE):
-			won = true
-			if not (game_mode == "challenge" and challenge_completed):
-				auto_advance_timer = 1.2
-			if wolf_active:
-				wolf_crying = true
+			if item_tiles.is_empty():
+				won = true
+				if not (game_mode == "challenge" and challenge_completed):
+					auto_advance_timer = 1.2
+				if wolf_active:
+					wolf_crying = true
 
-			if timer_started:
-				current_time_sec = (Time.get_ticks_msec() - start_time_msec) / 1000.0
+				if timer_started:
+					current_time_sec = (Time.get_ticks_msec() - start_time_msec) / 1000.0
 
-			var rec_key = "%d_%d" % [current_world, difficulty_level]
-			var has_prev = best_records.has(rec_key)
-			var prev_best = float(best_records.get(rec_key, 999999.0))
-			var is_new_record = false
+				var rec_key = "%d_%d" % [current_world, difficulty_level]
+				var has_prev = best_records.has(rec_key)
+				var prev_best = float(best_records.get(rec_key, 999999.0))
+				var is_new_record = false
 
-			if not has_prev or current_time_sec < prev_best:
-				is_new_record = true
-				best_records[rec_key] = current_time_sec
+				if not has_prev or current_time_sec < prev_best:
+					is_new_record = true
+					best_records[rec_key] = current_time_sec
 
-			var base_score = (current_world - 1) * 1000 + difficulty_level * 100
-			if is_new_record:
-				last_round_score = base_score * 2
-				score_doubled = true
-			else:
-				last_round_score = base_score
-				score_doubled = false
-
-			if game_mode == "free":
-				total_score += last_round_score
-				_save_best_records()
-			elif game_mode == "challenge":
-				challenge_total_time += current_time_sec
-				challenge_total_score += last_round_score
-				if current_world == 5 and difficulty_level == 10:
-					challenge_completed = true
-					total_score += challenge_total_score
-					if challenge_best_time < 0.0 or challenge_total_time < challenge_best_time:
-						challenge_best_time = challenge_total_time
-					if challenge_total_score > challenge_best_score:
-						challenge_best_score = challenge_total_score
-					_save_best_records()
+				var base_score = (current_world - 1) * 1000 + difficulty_level * 100
+				if is_new_record:
+					last_round_score = base_score * 2
+					score_doubled = true
 				else:
+					last_round_score = base_score
+					score_doubled = false
+
+				if game_mode == "free":
+					total_score += last_round_score
 					_save_best_records()
+				elif game_mode == "challenge":
+					challenge_total_time += current_time_sec
+					challenge_total_score += last_round_score
+					if current_world == 5 and difficulty_level == 10:
+						challenge_completed = true
+						total_score += challenge_total_score
+						if challenge_best_time < 0.0 or challenge_total_time < challenge_best_time:
+							challenge_best_time = challenge_total_time
+						if challenge_total_score > challenge_best_score:
+							challenge_best_score = challenge_total_score
+						_save_best_records()
+					else:
+						_save_best_records()
 
-			_update_hud()
+				_update_hud()
 
-			if audio_win_player != null:
-				audio_win_player.play()
+				if audio_win_player != null:
+					audio_win_player.play()
+			else:
+				gate_locked_tip_timer = 2.0
+				_update_hud()
+				queue_redraw()
 
 		if following_player:
 			_update_player_focus()
@@ -1102,10 +1183,13 @@ func _update_hud() -> void:
 		elif caught_by_wolf:
 			status_label.text = "😱 被大灰狼抓住了！\n本局得分: 0 分\n👉 按 R 重新尝试本关"
 		else:
-			if game_mode == "free":
-				status_label.text = "🟢 正在自由模式练习...\n避开大灰狼到达小屋\n按 M 键可随时返回主菜单"
+			var item_info = WORLD_ITEM_INFO.get(current_world, WORLD_ITEM_INFO[1])
+			var rem = item_tiles.size()
+			var col = total_items_count - rem
+			if rem > 0:
+				status_label.text = "🎒 支线: 收集 %s%s (已收集 %d 个，还有 %d 个未收集)\n🔒 大门上锁！需集齐 7 个后方可通关" % [item_info["icon"], item_info["name"], col, rem]
 			else:
-				status_label.text = "🟢 闯关挑战中 (%d/50关)\n顺序挑战 50 阶全部迷宫\n创造最快全通时间与最高分！" % stage_idx
+				status_label.text = "🎒 支线: %s%s 已全部集齐 (已收集 7 个，还有 0 个未收集)\n🔓 出口大门已成功解封，请进屋通关！" % [item_info["icon"], item_info["name"]]
 
 func _load_best_records() -> void:
 	var path = "user://best_records.json"
@@ -1239,6 +1323,10 @@ func _draw() -> void:
 				elif is_shp and rect.size.x >= 4.0:
 					draw_rect(rect, Color(0.58, 0.94, 1.0), false, 1.0)
 
+				# 绘制待收集过关支线道具
+				if item_tiles.has(Vector2i(x, y)):
+					_draw_item_icon(rect, current_world, camera_scale)
+
 			elif tile == MazeGenerator.OVERPASS_NS:
 				_draw_overpass_underpass(rect, camera_scale, cur_path, cur_wall)
 				if p_in_tunnel and x == p_tx and y == p_ty:
@@ -1340,8 +1428,143 @@ func _draw() -> void:
 	if not w_in_tunnel:
 		_draw_wolf()
 
+	# 绘制微缩小地图 (在地图放大跟随模式下显示于左侧)
+	_draw_minimap()
+
 	# HUD 顶栏背景
 	draw_rect(Rect2(0, 0, maze_w, HUD_HEIGHT), COLOR_HUD_BG)
+
+	# 绘制尝试未集齐进门时的醒目警告横幅
+	if gate_locked_tip_timer > 0.0 and not item_tiles.is_empty():
+		var font_default = ThemeDB.fallback_font
+		if font_default != null:
+			var item_info = WORLD_ITEM_INFO[current_world]
+			var rem = item_tiles.size()
+			var col = total_items_count - rem
+			var tip_str = "🔒 大门未开启！需集齐 7 个 %s%s (已收集 %d 个，还有 %d 个未收集)" % [item_info["icon"], item_info["name"], col, rem]
+			var txt_sz = font_default.get_string_size(tip_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 15)
+			var bg_w = txt_sz.x + 28.0
+			var bg_h = 32.0
+			var bg_rect = Rect2((maze_w - bg_w) * 0.5, HUD_HEIGHT + 10.0, bg_w, bg_h)
+			draw_rect(bg_rect, Color(0.63, 0.08, 0.14, 0.95))
+			draw_rect(bg_rect, Color(1.0, 0.84, 0.0), false, 2.0)
+			draw_string(font_default, Vector2((maze_w - txt_sz.x) * 0.5, HUD_HEIGHT + 31.0), tip_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 15, Color(1.0, 0.92, 0.45))
+
+func _draw_minimap() -> void:
+	if not following_player or maze_data == null:
+		return
+
+	var win_size = get_viewport_rect().size
+	var maze_w = maxf(1.0, win_size.x - SIDEBAR_WIDTH)
+	var avail_h = maxf(1.0, win_size.y - HUD_HEIGHT)
+
+	var max_mm_w = 160.0
+	var max_mm_h = 160.0
+	var mm_x = 16.0
+	var mm_y = HUD_HEIGHT + 16.0
+
+	var scale_w = max_mm_w / (maze_data.cols * CELL_SIZE)
+	var scale_h = max_mm_h / (maze_data.rows * CELL_SIZE)
+	var mm_scale = minf(scale_w, scale_h)
+
+	var mm_w = maxf(70.0, maze_data.cols * CELL_SIZE * mm_scale)
+	var mm_h = maxf(70.0, maze_data.rows * CELL_SIZE * mm_scale)
+
+	var box_w = mm_w + 12.0
+	var box_h = mm_h + 26.0
+	var box_rect = Rect2(mm_x, mm_y, box_w, box_h)
+
+	# 1. 绘制半透明精致深色框底背板
+	draw_rect(box_rect, Color(0.05, 0.07, 0.12, 0.85))
+	draw_rect(box_rect, Color(0.24, 0.55, 0.78, 0.9), false, 2.0)
+
+	# 2. 标头说明文字
+	var font_default = ThemeDB.fallback_font
+	if font_default != null:
+		draw_string(font_default, Vector2(mm_x + 8.0, mm_y + 16.0), "📍 小地图 (C/Space还原)", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.8, 0.9, 1.0))
+
+	var map_start_x = mm_x + 6.0
+	var map_start_y = mm_y + 20.0
+
+	var cw = mm_w / float(maze_data.cols)
+	var ch = mm_h / float(maze_data.rows)
+
+	# 3. 绘制迷宫网格
+	for y in range(maze_data.rows):
+		var row = maze_data.grid[y]
+		for x in range(maze_data.cols):
+			var tile = row[x]
+			var tx = map_start_x + float(x) * cw
+			var ty = map_start_y + float(y) * ch
+			var t_rect = Rect2(tx, ty, maxf(1.0, cw), maxf(1.0, ch))
+			if tile == MazeGenerator.WALL:
+				draw_rect(t_rect, Color(0.11, 0.15, 0.22))
+			elif tile == MazeGenerator.OVERPASS_NS or tile == MazeGenerator.OVERPASS_EW:
+				draw_rect(t_rect, Color(0.31, 0.43, 0.63))
+			else:
+				draw_rect(t_rect, Color(0.18, 0.31, 0.39))
+
+	# 起点 & 终点
+	var ent_x = map_start_x + (float(maze_data.entrance.x) + 0.5) * cw
+	var ent_y = map_start_y + (float(maze_data.entrance.y) + 0.5) * ch
+	draw_circle(Vector2(ent_x, ent_y), maxf(2.0, minf(cw, ch) * 1.2), Color(0.16, 0.86, 0.39))
+
+	var exit_x = map_start_x + (float(maze_data.exit_tile.x) + 0.5) * cw
+	var exit_y = map_start_y + (float(maze_data.exit_tile.y) + 0.5) * ch
+	draw_circle(Vector2(exit_x, exit_y), maxf(2.0, minf(cw, ch) * 1.2), Color(1.0, 0.24, 0.24))
+
+	# 待收集支线道具在小地图上的发光标记点
+	if not item_tiles.is_empty():
+		var item_color = Color(1.0, 0.31, 0.31) if current_world == 1 else (Color(1.0, 0.47, 0.55) if current_world == 2 else (Color(1.0, 0.84, 0.0) if current_world == 3 else (Color(0.0, 0.90, 1.0) if current_world == 4 else Color(1.0, 0.16, 0.78))))
+		for it in item_tiles:
+			var it_x = map_start_x + (float(it.x) + 0.5) * cw
+			var it_y = map_start_y + (float(it.y) + 0.5) * ch
+			draw_circle(Vector2(it_x, it_y), maxf(2.0, minf(cw, ch) * 1.3), item_color)
+
+	# 自动寻路线
+	if show_auto_path and auto_path.size() > 0 and int(auto_path_idx) > 0:
+		var ap_pts: PackedVector2Array = []
+		var limit = min(int(auto_path_idx), auto_path.size())
+		for i in range(limit):
+			var tile = auto_path[i]
+			var ap_x = map_start_x + (float(tile.x) + 0.5) * cw
+			var ap_y = map_start_y + (float(tile.y) + 0.5) * ch
+			ap_pts.append(Vector2(ap_x, ap_y))
+		if ap_pts.size() >= 2:
+			draw_polyline(ap_pts, Color(1.0, 0.84, 0.0), maxf(1.0, minf(cw, ch)))
+
+	# 追赶的大灰狼
+	if wolf_active:
+		var wx_cell = wolf_pos.x / CELL_SIZE
+		var wy_cell = wolf_pos.y / CELL_SIZE
+		var w_x = map_start_x + wx_cell * cw
+		var w_y = map_start_y + wy_cell * ch
+		draw_circle(Vector2(w_x, w_y), maxf(3.0, minf(cw, ch) * 1.5), Color(1.0, 0.2, 0.31))
+
+	# 玩家位置
+	if player != null:
+		var p_center = player.pixel_position + Vector2(player.size / 2.0, player.size / 2.0)
+		var px_cell = p_center.x / CELL_SIZE
+		var py_cell = p_center.y / CELL_SIZE
+		var p_x = map_start_x + px_cell * cw
+		var p_y = map_start_y + py_cell * ch
+		var p_r = maxf(3.0, minf(cw, ch) * 1.8)
+		draw_circle(Vector2(p_x, p_y), p_r, Color(0.0, 1.0, 1.0))
+		draw_circle(Vector2(p_x, p_y), maxf(1.0, p_r - 2.0), Color(1.0, 1.0, 1.0))
+
+	# 4. 当前镜头视口框
+	var min_wx = maxf(0.0, (0.0 - offset_pos.x) / camera_scale)
+	var max_wx = minf(maze_data.cols * CELL_SIZE, (maze_w - offset_pos.x) / camera_scale)
+	var min_wy = maxf(0.0, (HUD_HEIGHT - offset_pos.y) / camera_scale)
+	var max_wy = minf(maze_data.rows * CELL_SIZE, (HUD_HEIGHT + avail_h - offset_pos.y) / camera_scale)
+
+	var vx1 = map_start_x + (min_wx / CELL_SIZE) * cw
+	var vy1 = map_start_y + (min_wy / CELL_SIZE) * ch
+	var vx2 = map_start_x + (max_wx / CELL_SIZE) * cw
+	var vy2 = map_start_y + (max_wy / CELL_SIZE) * ch
+
+	var v_rect = Rect2(Vector2(vx1, vy1), Vector2(maxf(4.0, vx2 - vx1), maxf(4.0, vy2 - vy1)))
+	draw_rect(v_rect, Color(1.0, 0.90, 0.39, 0.9), false, 1.0)
 
 func _draw_main_menu(win_size: Vector2) -> void:
 	draw_rect(Rect2(Vector2.ZERO, win_size), Color(0.05, 0.06, 0.10))
@@ -1477,15 +1700,79 @@ func _draw_main_menu(win_size: Vector2) -> void:
 	# 7. 提示
 	draw_string(font_default, Vector2(cx - 210, win_size.y - 22), "👉 点击模式或调音按钮 | 按 [1]/[2] 启动模式 | 按 [ESC] 退出程序", HORIZONTAL_ALIGNMENT_CENTER, -1, 13, Color(0.51, 0.59, 0.69))
 
+func _draw_item_icon(rect: Rect2, world: int, scale: float) -> void:
+	var w = rect.size.x
+	var h = rect.size.y
+	if w < 4.0 or h < 4.0:
+		return
+	var cx = rect.position.x + w * 0.5
+	var cy = rect.position.y + h * 0.5
+
+	if world == 1:
+		var stem_w = maxf(2.0, w * 0.22)
+		var stem_h = maxf(3.0, h * 0.35)
+		var stem_rect = Rect2(cx - stem_w * 0.5, cy + h * 0.05, stem_w, stem_h)
+		draw_rect(stem_rect, Color(0.94, 0.90, 0.82))
+
+		var cap_r = maxf(4.0, w * 0.38)
+		draw_circle(Vector2(cx, cy - h * 0.05), cap_r, Color(0.88, 0.18, 0.18))
+
+		var dot_r = maxf(1.0, cap_r * 0.28)
+		draw_circle(Vector2(cx - cap_r * 0.4, cy - h * 0.12), dot_r, Color(1, 1, 1))
+		draw_circle(Vector2(cx + cap_r * 0.35, cy - h * 0.08), dot_r, Color(1, 1, 1))
+		draw_circle(Vector2(cx, cy - h * 0.25), dot_r, Color(1, 1, 1))
+
+	elif world == 2:
+		var bone_w = maxf(3.0, w * 0.52)
+		var bone_h = maxf(2.0, h * 0.18)
+		draw_line(Vector2(cx - bone_w * 0.5, cy - h * 0.1), Vector2(cx + bone_w * 0.5, cy + h * 0.1), Color(0.94, 0.92, 0.86), bone_h)
+		draw_circle(Vector2(cx - bone_w * 0.5, cy - h * 0.1), maxf(2.0, bone_h), Color(0.94, 0.92, 0.86))
+		draw_circle(Vector2(cx + bone_w * 0.5, cy + h * 0.1), maxf(2.0, bone_h), Color(0.94, 0.92, 0.86))
+
+		var meat_r = maxf(4.0, w * 0.32)
+		draw_circle(Vector2(cx - w * 0.05, cy), meat_r, Color(0.70, 0.16, 0.20))
+		draw_circle(Vector2(cx - w * 0.05, cy), maxf(2.0, meat_r * 0.5), Color(0.86, 0.35, 0.39))
+
+	elif world == 3:
+		var key_r = maxf(3.0, w * 0.22)
+		var key_x = cx - w * 0.15
+		var key_y = cy - h * 0.12
+		draw_circle(Vector2(key_x, key_y), key_r, Color(1.0, 0.84, 0.0), false, maxf(1.0, key_r * 0.4))
+
+		var stem_len = maxf(5.0, w * 0.42)
+		draw_line(Vector2(key_x, key_y), Vector2(key_x + stem_len, key_y + stem_len), Color(1.0, 0.84, 0.0), maxf(2.0, scale * 2.2))
+		var tx = key_x + stem_len * 0.7
+		var ty = key_y + stem_len * 0.7
+		draw_line(Vector2(tx, ty), Vector2(tx + w * 0.15, ty - h * 0.15), Color(1.0, 0.84, 0.0), maxf(2.0, scale * 1.8))
+
+	elif world == 4:
+		var pts = PackedVector2Array([
+			Vector2(cx, cy - h * 0.38),
+			Vector2(cx + w * 0.32, cy - h * 0.05),
+			Vector2(cx, cy + h * 0.38),
+			Vector2(cx - w * 0.32, cy - h * 0.05)
+		])
+		draw_colored_polygon(pts, Color(0.0, 0.86, 1.0))
+		draw_polyline(pts, Color(0.78, 0.98, 1.0), 1.0)
+		draw_line(Vector2(cx, cy - h * 0.38), Vector2(cx, cy + h * 0.38), Color(1, 1, 1), 1.0)
+
+	elif world == 5:
+		var r_outer = maxf(4.0, w * 0.36)
+		draw_circle(Vector2(cx, cy), r_outer, Color(1.0, 0.16, 0.63), false, maxf(1.0, scale * 2.0))
+		draw_circle(Vector2(cx, cy), maxf(3.0, r_outer * 0.65), Color(0.0, 0.94, 1.0))
+		draw_circle(Vector2(cx, cy), maxf(1.0, r_outer * 0.3), Color(1.0, 1.0, 0.86))
+
 func _draw_tile_marker(tile: Vector2i, color: Color, type: String) -> void:
 	var p1 = offset_pos + Vector2(tile.x * CELL_SIZE, tile.y * CELL_SIZE) * camera_scale
 	var p2 = offset_pos + Vector2((tile.x + 1) * CELL_SIZE, (tile.y + 1) * CELL_SIZE) * camera_scale
 	var rect = Rect2(p1, p2 - p1)
-	draw_rect(rect, color)
+	var is_locked = (type == "house" and not item_tiles.is_empty())
+	var tile_color = Color(0.48, 0.16, 0.20) if is_locked else color
+	draw_rect(rect, tile_color)
 
-	# 给终点/起点绘制耀眼高对比外框，防止与背景混淆
 	if type == "house":
-		draw_rect(rect, Color(1.0, 0.80, 0.30), false, max(1.0, camera_scale * 1.8))
+		var border_c = Color(0.88, 0.18, 0.22) if is_locked else Color(0.30, 0.95, 0.45)
+		draw_rect(rect, border_c, false, max(1.0, camera_scale * 2.2))
 	elif type == "tree":
 		draw_rect(rect, Color(0.40, 0.90, 0.40), false, max(1.0, camera_scale * 1.8))
 	elif type == "flag":
@@ -1494,6 +1781,11 @@ func _draw_tile_marker(tile: Vector2i, color: Color, type: String) -> void:
 	if rect.size.x >= 6.0:
 		if type == "house":
 			_draw_mini_house(rect)
+			var font_default = ThemeDB.fallback_font
+			if font_default != null and rect.size.x >= 10.0:
+				var lock_str = "🔒" if is_locked else "🔓"
+				var f_sz = max(9, int(rect.size.x * 0.35))
+				draw_string(font_default, Vector2(rect.position.x + rect.size.x * 0.1, rect.position.y + rect.size.y * 0.35), lock_str, HORIZONTAL_ALIGNMENT_CENTER, -1, f_sz, Color(1, 1, 1))
 		elif type == "tree":
 			_draw_mini_tree(rect)
 		elif type == "flag":
