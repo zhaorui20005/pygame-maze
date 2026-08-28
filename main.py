@@ -1164,6 +1164,7 @@ def main() -> None:
             item_tiles,
             total_items_count,
             gate_locked_tip_timer,
+            win_path,
         )
         pygame.display.flip()
         clock.tick(FPS)
@@ -2225,6 +2226,8 @@ def _draw_sidebar(
     camera: Camera | None = None,
     item_tiles: set[tuple[int, int]] | None = None,
     total_items_count: int = 0,
+    gate_locked_tip_timer: float = 0.0,
+    win_path: list[tuple[int, int]] | None = None,
 ) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect, pygame.Rect]:
     """右侧独立记分牌面板：包含总得分、关卡分值、调试选关按钮、计时纪录与提示卡片。"""
     sw, sh = screen.get_size()
