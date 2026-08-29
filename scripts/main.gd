@@ -637,21 +637,36 @@ func focus_player() -> void:
 		var scale_h = (avail_h - 16.0) / mh
 		fit_scale = minf(1.0, minf(scale_w, scale_h))
 
-	var target_render_size = 30.0 # 保持与 Level 10 同等舒适的放大渲染尺寸 (约 1.15 倍)
+	var target_render_size = 30.0 # 保持与 Level 10 同等舒适的放大渲染尺寸
 	camera_scale = maxf(1.0, target_render_size / CELL_SIZE)
 	following_player = true
-	_update_player_focus()
+	_snap_player_focus()
 
-func _update_player_focus() -> void:
-	if not following_player:
+func _snap_player_focus() -> void:
+	if not following_player or player == null:
 		return
 	var win_size = get_viewport_rect().size
-	var avail_w = max(1.0, win_size.x - SIDEBAR_WIDTH)
-	var avail_h = max(1.0, win_size.y - HUD_HEIGHT)
+	var avail_w = maxf(1.0, win_size.x - SIDEBAR_WIDTH)
+	var avail_h = maxf(1.0, win_size.y - HUD_HEIGHT)
 	var vc_x = avail_w / 2.0
 	var vc_y = HUD_HEIGHT + avail_h / 2.0
-	offset_pos.x = vc_x - (player.pixel_position.x + player.size / 2.0) * camera_scale
-	offset_pos.y = vc_y - (player.pixel_position.y + player.size / 2.0) * camera_scale
+	offset_pos.x = vc_x - (player.pixel_position.x + player.size * 0.5) * camera_scale
+	offset_pos.y = vc_y - (player.pixel_position.y + player.size * 0.5) * camera_scale
+
+func _update_player_focus(delta: float = 0.016) -> void:
+	if not following_player or player == null:
+		return
+	var win_size = get_viewport_rect().size
+	var avail_w = maxf(1.0, win_size.x - SIDEBAR_WIDTH)
+	var avail_h = maxf(1.0, win_size.y - HUD_HEIGHT)
+	var vc_x = avail_w / 2.0
+	var vc_y = HUD_HEIGHT + avail_h / 2.0
+	var target_x = vc_x - (player.pixel_position.x + player.size * 0.5) * camera_scale
+	var target_y = vc_y - (player.pixel_position.y + player.size * 0.5) * camera_scale
+
+	var lerp_rate = minf(1.0, 14.0 * delta)
+	offset_pos.x = lerp(offset_pos.x, target_x, lerp_rate)
+	offset_pos.y = lerp(offset_pos.y, target_y, lerp_rate)
 
 func _start_free_mode_at_level(world: int = 1, level: int = 1) -> void:
 	in_menu = false
@@ -786,8 +801,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	var win_size = get_viewport_rect().size
 	var cx = win_size.x / 2.0
 	var cy = win_size.y / 2.0
-	var btn_free_rect = Rect2(cx - 290, cy - 202, 580, 50)
-	var btn_chal_rect = Rect2(cx - 290, cy - 146, 580, 50)
+	var btn_free_rect = Rect2(cx - 290, cy - 222, 580, 48)
+	var btn_chal_rect = Rect2(cx - 290, cy - 168, 580, 48)
 
 	var sound_card_y = cy + 84
 	var walk_minus = Rect2(cx - 290 + 120, sound_card_y + 26, 28, 22)
@@ -814,25 +829,29 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 				for i in range(1, 11):
 					var bx = cx - 290 + 190 + (i - 1) * 37
-					var b1 = Rect2(bx, cy - 90 + 6, 33, 24)
+					var b1 = Rect2(bx, cy - 114 + 6, 33, 24)
 					if b1.has_point(event.position):
 						_start_free_mode_at_level(1, i)
 						return
-					var b2 = Rect2(bx, cy - 90 + 37, 33, 24)
+					var b2 = Rect2(bx, cy - 114 + 37, 33, 24)
 					if b2.has_point(event.position):
 						_start_free_mode_at_level(2, i)
 						return
-					var b3 = Rect2(bx, cy - 90 + 68, 33, 24)
+					var b3 = Rect2(bx, cy - 114 + 68, 33, 24)
 					if b3.has_point(event.position):
 						_start_free_mode_at_level(3, i)
 						return
-					var b4 = Rect2(bx, cy - 90 + 99, 33, 24)
+					var b4 = Rect2(bx, cy - 114 + 99, 33, 24)
 					if b4.has_point(event.position):
 						_start_free_mode_at_level(4, i)
 						return
-					var b5 = Rect2(bx, cy - 90 + 130, 33, 24)
+					var b5 = Rect2(bx, cy - 114 + 130, 33, 24)
 					if b5.has_point(event.position):
 						_start_free_mode_at_level(5, i)
+						return
+					var b6 = Rect2(bx, cy - 114 + 161, 33, 24)
+					if b6.has_point(event.position):
+						_start_free_mode_at_level(6, i)
 						return
 				if btn_free_rect.has_point(event.position):
 					_start_free_mode_at_level(1, 1)
@@ -1167,7 +1186,7 @@ func _physics_process(delta: float) -> void:
 				queue_redraw()
 
 		if following_player:
-			_update_player_focus()
+			_update_player_focus(delta)
 
 	elif won:
 		if not (game_mode == "challenge" and challenge_completed):
@@ -1716,29 +1735,29 @@ func _draw_main_menu(win_size: Vector2) -> void:
 		return
 
 	# 1. 标题与副标题
-	draw_string(font_default, Vector2(cx - 180, cy - 255), "🎮 小红帽迷宫大冒险", HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(1, 0.88, 0.35))
-	draw_string(font_default, Vector2(cx - 180, cy - 222), "—— 请选择游戏模式 & 调整声音设置 ——", HORIZONTAL_ALIGNMENT_CENTER, -1, 16, Color(0.67, 0.75, 0.85))
+	draw_string(font_default, Vector2(cx - 180, cy - 268), "🎮 小红帽迷宫大冒险", HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(1, 0.88, 0.35))
+	draw_string(font_default, Vector2(cx - 180, cy - 238), "—— 请选择游戏模式 & 调整声音设置 ——", HORIZONTAL_ALIGNMENT_CENTER, -1, 16, Color(0.67, 0.75, 0.85))
 
 	var card_w = 580.0
 
 	# 2. 模式 1：自由模式 (Free Mode)
-	var btn1_rect = Rect2(cx - card_w / 2.0, cy - 202, card_w, 50)
+	var btn1_rect = Rect2(cx - card_w / 2.0, cy - 222, card_w, 48)
 	draw_rect(btn1_rect, Color(0.09, 0.13, 0.20))
 	draw_rect(btn1_rect, Color(0.39, 0.70, 1.0), false, 1.5)
 
-	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 22), "🌟 1. 自由模式 (Free Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.94, 0.6))
-	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 42), "按 [1] 键或点击 | 1~10 阶自由切换，无限切关与随心练习", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
+	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 20), "🌟 1. 自由模式 (Free Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.94, 0.6))
+	draw_string(font_default, Vector2(btn1_rect.position.x + 18, btn1_rect.position.y + 40), "按 [1] 键或点击 | 1~10 阶自由切换，无限切关与随心练习", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
 
 	# 3. 模式 2：闯关模式 (Challenge Mode)
-	var btn2_rect = Rect2(cx - card_w / 2.0, cy - 146, card_w, 50)
+	var btn2_rect = Rect2(cx - card_w / 2.0, cy - 168, card_w, 48)
 	draw_rect(btn2_rect, Color(0.09, 0.13, 0.20))
 	draw_rect(btn2_rect, Color(1.0, 0.82, 0.35), false, 1.5)
 
-	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 22), "🏆 2. 闯关模式 (Challenge Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.86, 0.35))
-	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 42), "按 [2] 键或点击 | 森林 + 地牢 + 秘境 + 异形 + 立交 共 50 关连续大满贯", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
+	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 20), "🏆 2. 闯关模式 (Challenge Mode)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.86, 0.35))
+	draw_string(font_default, Vector2(btn2_rect.position.x + 18, btn2_rect.position.y + 40), "按 [2] 键或点击 | 森林 + 地牢 + 秘境 + 异形 + 立交 + 提示词 共 60 关连续大满贯", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.63, 0.71, 0.80))
 
-	# 4. 调试/自由选关卡片 (五大关 50 阶)
-	var lvl_card = Rect2(cx - card_w / 2.0, cy - 90, card_w, 166)
+	# 4. 调试/自由选关卡片 (六大关 60 阶)
+	var lvl_card = Rect2(cx - card_w / 2.0, cy - 114, card_w, 192)
 	draw_rect(lvl_card, Color(0.09, 0.13, 0.20))
 	draw_rect(lvl_card, Color(0.24, 0.35, 0.55), false, 1.0)
 
@@ -1792,8 +1811,18 @@ func _draw_main_menu(win_size: Vector2) -> void:
 		draw_rect(brect, Color(0.47, 0.86, 1.0), false, 1.0)
 		draw_string(font_default, Vector2(bx + 11, by + 16), str(i), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1))
 
+	# 第六大关
+	draw_string(font_default, Vector2(lvl_card.position.x + 16, lvl_card.position.y + 177), "🔤 第六大关 (提示词阵):", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.39, 0.94, 1.0))
+	for i in range(1, 11):
+		var bx = lvl_card.position.x + 190 + (i - 1) * 37
+		var by = lvl_card.position.y + 161
+		var brect = Rect2(bx, by, 33, 24)
+		draw_rect(brect, Color(0.09, 0.24, 0.31))
+		draw_rect(brect, Color(0.39, 0.94, 1.0), false, 1.0)
+		draw_string(font_default, Vector2(bx + 11, by + 16), str(i), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1))
+
 	# 5. 卡片 4：🎵 声音大小设置 (Sound Settings)
-	var sound_card = Rect2(cx - card_w / 2.0, cy + 84, card_w, 110)
+	var sound_card = Rect2(cx - card_w / 2.0, cy + 84, card_w, 106)
 	draw_rect(sound_card, Color(0.09, 0.13, 0.20))
 	draw_rect(sound_card, Color(0.24, 0.35, 0.55), false, 1.0)
 
@@ -1826,7 +1855,7 @@ func _draw_main_menu(win_size: Vector2) -> void:
 	_draw_vol_row.call("🎵 背景音乐", sound_card.position.y + 76, vol_bgm)
 
 	# 6. 排行榜纪录卡片
-	var card_rect = Rect2(cx - card_w / 2.0, cy + 202, card_w, 66)
+	var card_rect = Rect2(cx - card_w / 2.0, cy + 196, card_w, 62)
 	draw_rect(card_rect, Color(0.07, 0.10, 0.16))
 	draw_rect(card_rect, Color(0.16, 0.23, 0.35), false, 1.0)
 

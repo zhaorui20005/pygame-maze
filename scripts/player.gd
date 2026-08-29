@@ -9,7 +9,7 @@ var size: float = 14.0
 var facing: String = "down"
 var anim_frame: int = 0
 var is_moving: bool = false
-var overpass_layer: String = "none" # 立交桥层级: "none", "ns_bridge", "ew_tunnel"
+var overpass_layer: String = "none" # 立交桥层级: "none", "ns_bridge", "ew_tunnel", "ew_bridge", "ns_tunnel"
 var _step_timer: float = 0.0
 
 signal step_taken
@@ -36,6 +36,9 @@ func process_movement(delta: float, maze_data: MazeGenerator.MazeData, cell_size
 	if Input.is_action_pressed("ui_down") or Input.is_key_pressed(KEY_S):
 		move_vec.y += 1.0
 
+	if move_vec.x != 0.0 and move_vec.y != 0.0:
+		move_vec = move_vec.normalized()
+
 	var moved = false
 	var old_pos = pixel_position
 
@@ -47,6 +50,9 @@ func process_movement(delta: float, maze_data: MazeGenerator.MazeData, cell_size
 		facing = "up"
 	elif move_vec.y > 0:
 		facing = "down"
+
+	var cx = int((pixel_position.x + size * 0.5) / cell_size)
+	var cy = int((pixel_position.y + size * 0.5) / cell_size)
 
 	if move_vec.x != 0:
 		_move_axis(move_vec.x * speed * delta, 0, maze_data, cell_size)
@@ -60,19 +66,27 @@ func process_movement(delta: float, maze_data: MazeGenerator.MazeData, cell_size
 	is_moving = moved
 
 	# 更新在 OVERPASS 瓦片上的层级状态
-	var cx = int((pixel_position.x + size * 0.5) / cell_size)
-	var cy = int((pixel_position.y + size * 0.5) / cell_size)
-	if cx >= 0 and cx < maze_data.cols and cy >= 0 and cy < maze_data.rows:
-		var tile_val = maze_data.grid[cy][cx]
+	var new_cx = int((pixel_position.x + size * 0.5) / cell_size)
+	var new_cy = int((pixel_position.y + size * 0.5) / cell_size)
+	if new_cx >= 0 and new_cx < maze_data.cols and new_cy >= 0 and new_cy < maze_data.rows:
+		var tile_val = maze_data.grid[new_cy][new_cx]
 		if tile_val == MazeGenerator.OVERPASS_NS:
-			if overpass_layer == "none":
-				if facing == "up" or facing == "down":
+			if cx != new_cx:
+				overpass_layer = "ew_tunnel"
+			elif cy != new_cy:
+				overpass_layer = "ns_bridge"
+			elif overpass_layer == "none":
+				if facing == "up" or facing == "down" or move_vec.y != 0:
 					overpass_layer = "ns_bridge"
 				else:
 					overpass_layer = "ew_tunnel"
 		elif tile_val == MazeGenerator.OVERPASS_EW:
-			if overpass_layer == "none":
-				if facing == "left" or facing == "right":
+			if cx != new_cx:
+				overpass_layer = "ew_bridge"
+			elif cy != new_cy:
+				overpass_layer = "ns_tunnel"
+			elif overpass_layer == "none":
+				if facing == "left" or facing == "right" or move_vec.x != 0:
 					overpass_layer = "ew_bridge"
 				else:
 					overpass_layer = "ns_tunnel"

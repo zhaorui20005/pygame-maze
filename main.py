@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import os
@@ -106,7 +107,7 @@ from player import Player
 
 CELL_SIZE = 26  # 房间变大后略缩小格子，尽量仍能在常见分辨率下完整显示
 HUD_HEIGHT = 48
-SIDEBAR_WIDTH = 280  # 右侧独立记分牌与状态面板宽度
+SIDEBAR_WIDTH = 290  # 右侧独立记分牌与状态面板宽度 (加宽至 290px，避免中文字体宽度挤压)
 FPS = 60
 PLAYER_INSET = 6  # 角色比格子小一圈，转弯时不容易被墙角卡住
 
@@ -170,6 +171,11 @@ NUM_KEY_TO_LEVEL = {
 }
 
 
+@functools.lru_cache(maxsize=128)
+def _get_scaled_surf(surf: pygame.Surface, w: int, h: int) -> pygame.Surface:
+    return pygame.transform.smoothscale(surf, (w, h))
+
+
 class Camera:
     """视角摄像机：支持按视口紧贴适应、自动缩放、拖拽平移与滚轮缩放。"""
 
@@ -217,12 +223,12 @@ class Camera:
             scale_h = (avail_h - 16) / mh
             self.fit_scale = min(1.0, scale_w, scale_h)
 
-        target_render_size = 30.0  # 保持与 Level 10 同等舒适的放大渲染尺寸 (约 1.15 倍，不会使小地图过度暴涨)
+        target_render_size = 30.0  # 保持与 Level 10 同等舒适的放大渲染尺寸
         self.scale = max(1.0, target_render_size / CELL_SIZE)
         self.following_player = True
-        self.update_player_focus(player, screen)
+        self.snap_player_focus(player, screen)
 
-    def update_player_focus(self, player: Player, screen: pygame.Surface) -> None:
+    def snap_player_focus(self, player: Player, screen: pygame.Surface) -> None:
         if not self.following_player:
             return
         sw, sh = screen.get_size()
@@ -230,8 +236,28 @@ class Camera:
         avail_h = max(1, sh - HUD_HEIGHT)
         vc_x = avail_w / 2.0
         vc_y = HUD_HEIGHT + avail_h / 2.0
-        self.offset_x = vc_x - player.rect.centerx * self.scale
-        self.offset_y = vc_y - player.rect.centery * self.scale
+        px = player.x + player.size * 0.5
+        py = player.y + player.size * 0.5
+        self.offset_x = vc_x - px * self.scale
+        self.offset_y = vc_y - py * self.scale
+
+    def update_player_focus(self, player: Player, screen: pygame.Surface, dt: float = 1.0 / 60.0) -> None:
+        if not self.following_player:
+            return
+        sw, sh = screen.get_size()
+        avail_w = max(1, sw - SIDEBAR_WIDTH)
+        avail_h = max(1, sh - HUD_HEIGHT)
+        vc_x = avail_w / 2.0
+        vc_y = HUD_HEIGHT + avail_h / 2.0
+        px = player.x + player.size * 0.5
+        py = player.y + player.size * 0.5
+        target_x = vc_x - px * self.scale
+        target_y = vc_y - py * self.scale
+
+        # 平滑缓动 (Lerp) 追随，彻底解决剧烈画面跳动与眩晕眼花感
+        lerp_rate = min(1.0, 14.0 * dt)
+        self.offset_x += (target_x - self.offset_x) * lerp_rate
+        self.offset_y += (target_y - self.offset_y) * lerp_rate
 
     def toggle_view(self, maze: Maze, player: Player, screen: pygame.Surface) -> None:
         """按 C / Space / Z 键或点击侧边栏按钮：在全景还原与地图放大跟随视角之间切换。"""
@@ -277,17 +303,84 @@ class Camera:
         return self.offset_x + wx * self.scale, self.offset_y + wy * self.scale
 
 
-def _font(size: int) -> pygame.font.Font:
-    """优先用系统中文字体，跨平台（Windows / macOS / Linux）支持中文字体。"""
-    for name in FONT_CANDIDATES:
-        path = pygame.font.match_font(name)
-        if path:
+@functools.lru_cache(maxsize=1)
+def _get_cjk_font_file_or_name() -> tuple[str | None, str | None]:
+    """获取跨平台中文字体文件绝对路径或 SysFont 名称（优先绝对路径，100% 解决 Windows 乱码/豆腐块问题）。"""
+    win_dir = os.environ.get("WINDIR", "C:\\Windows")
+    win_font_paths = [
+        os.path.join(win_dir, "Fonts", "msyh.ttc"),      # 微软雅黑
+        os.path.join(win_dir, "Fonts", "msyh.ttf"),
+        os.path.join(win_dir, "Fonts", "msyhbd.ttc"),
+        os.path.join(win_dir, "Fonts", "simhei.ttf"),    # 黑体
+        os.path.join(win_dir, "Fonts", "simsun.ttc"),    # 宋体
+        os.path.join(win_dir, "Fonts", "deng.ttf"),      # 等线
+        os.path.join(win_dir, "Fonts", "kaiti.ttf"),     # 楷体
+    ]
+    for path in win_font_paths:
+        if os.path.exists(path):
             try:
-                return pygame.font.Font(path, size)
+                _test_font = pygame.font.Font(path, 16)
+                return (path, None)
             except Exception:
                 pass
+
+    other_font_paths = [
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    ]
+    for path in other_font_paths:
+        if os.path.exists(path):
+            try:
+                _test_font = pygame.font.Font(path, 16)
+                return (path, None)
+            except Exception:
+                pass
+
+    font_names = (
+        "microsoftyahei", "msyh", "simhei", "simsun", "dengxian",
+        "stheitimedium", "stheitilight", "stheiti", "hiraginosansgb", "pingfangsc",
+        "wqy-microhei", "wqy-zenhei", "notosanscjksc", "arialunicode"
+    )
+    for name in font_names:
+        matched_path = pygame.font.match_font(name)
+        if matched_path and os.path.exists(matched_path):
+            try:
+                _test_font = pygame.font.Font(matched_path, 16)
+                return (matched_path, None)
+            except Exception:
+                pass
+
+    for name in font_names:
+        try:
+            sys_font = pygame.font.SysFont(name, 16)
+            if sys_font:
+                return (None, name)
+        except Exception:
+            pass
+
+    return (None, None)
+
+
+@functools.lru_cache(maxsize=128)
+def _font(size: int) -> pygame.font.Font:
+    """获取指定字号的 Font，带 LRU 缓存，彻底解决 Windows / macOS 逐帧匹配卡顿与字体无法显示问题。"""
+    file_path, sys_name = _get_cjk_font_file_or_name()
+    if file_path:
+        try:
+            return pygame.font.Font(file_path, size)
+        except Exception:
+            pass
+    if sys_name:
+        try:
+            return pygame.font.SysFont(sys_name, size)
+        except Exception:
+            pass
     try:
-        return pygame.font.SysFont("stheitimedium,microsoftyahei,simhei,sans-serif", size)
+        return pygame.font.SysFont("microsoftyahei", size)
     except Exception:
         return pygame.font.Font(None, size)
 
@@ -319,8 +412,8 @@ def _window_size(maze: Maze) -> tuple[int, int]:
     except Exception:
         screen_w, screen_h = 1280, 800
 
-    desired_w = max(maze.cols * CELL_SIZE + SIDEBAR_WIDTH + 16, 960)
-    desired_h = max(maze.rows * CELL_SIZE + HUD_HEIGHT + 16, 720)
+    desired_w = max(maze.cols * CELL_SIZE + SIDEBAR_WIDTH + 16, 980)
+    desired_h = max(maze.rows * CELL_SIZE + HUD_HEIGHT + 16, 760)
 
     # 限制窗口最大宽高，留出桌面任务栏/菜单栏空间
     max_w = int(screen_w * 0.92)
@@ -622,11 +715,13 @@ def main() -> None:
     item_tiles: set[tuple[int, int]] = set()
     total_items_count: int = 0
     gate_locked_tip_timer: float = 0.0
+    sidebar_scroll_y: float = 0.0
+    max_sidebar_scroll: float = 0.0
 
     def reset_level_state():
         nonlocal maze, screen, player, wolf, camera, won, win_path, caught_by_wolf, timer_started, start_time_ms, current_time_sec, auto_advance_timer, show_auto_path
         nonlocal auto_visited_order, auto_path, auto_parent_map, auto_search_idx, auto_path_idx, auto_path_phase
-        nonlocal item_tiles, total_items_count, gate_locked_tip_timer
+        nonlocal item_tiles, total_items_count, gate_locked_tip_timer, sidebar_scroll_y, max_sidebar_scroll
         if not check_and_update_regen_cooldown():
             return
         maze = _make_maze(current_world, difficulty_level)
@@ -637,6 +732,8 @@ def main() -> None:
         item_tiles = set(maze.item_tiles)
         total_items_count = len(item_tiles)
         gate_locked_tip_timer = 0.0
+        sidebar_scroll_y = 0.0
+        max_sidebar_scroll = 0.0
         show_auto_path = False
         win_path = []
 
@@ -989,6 +1086,8 @@ def main() -> None:
                     factor = 1.15 if event.y > 0 else (1 / 1.15 if event.y < 0 else 1.0)
                     if factor != 1.0:
                         camera.zoom(factor, (mx, my))
+                elif mx >= screen.get_width() - SIDEBAR_WIDTH:
+                    sidebar_scroll_y = max(0.0, min(max_sidebar_scroll, sidebar_scroll_y - event.y * 30.0))
 
         # 通关/被抓后停步，但仍可按 R / 数字键 重开。
         dt = clock.get_time() / 1000.0
@@ -1005,7 +1104,7 @@ def main() -> None:
             if timer_started:
                 current_time_sec = (pygame.time.get_ticks() - start_time_ms) / 1000.0
 
-            player.update(keys, maze, CELL_SIZE, sound_step)
+            player.update(keys, maze, CELL_SIZE, dt, sound_step)
 
             # 检查玩家是否踩到支线道具格并收集
             p_tile = (int(player.rect.centerx // CELL_SIZE), int(player.rect.centery // CELL_SIZE))
@@ -1091,7 +1190,7 @@ def main() -> None:
                     gate_locked_tip_timer = 2.0
 
             if camera.following_player:
-                camera.update_player_focus(player, screen)
+                camera.update_player_focus(player, screen, dt)
             else:
                 # 检查玩家坐标是否离开左侧视口区域
                 sw, sh = screen.get_size()
@@ -1127,7 +1226,7 @@ def main() -> None:
                     auto_path_idx = float(len(auto_path))
                     auto_path_phase = "complete"
 
-        sidebar_level_rects, btn_auto_path_rect, btn_view_rect = _draw(
+        sidebar_level_rects, btn_auto_path_rect, btn_view_rect, max_sidebar_scroll = _draw(
             screen,
             maze,
             player,
@@ -1165,6 +1264,7 @@ def main() -> None:
             total_items_count,
             gate_locked_tip_timer,
             win_path,
+            sidebar_scroll_y,
         )
         pygame.display.flip()
         clock.tick(FPS)
@@ -1193,18 +1293,18 @@ def _draw_main_menu(
 
     # 1. 主标题与副标题
     title_surf = big_font.render("🎮 小红帽迷宫大冒险", True, (255, 225, 90))
-    title_rect = title_surf.get_rect(center=(cx, cy - 235))
+    title_rect = title_surf.get_rect(center=(cx, cy - 268))
     screen.blit(title_surf, title_rect)
 
     sub_surf = font.render("—— 请选择游戏模式 & 调整声音设置 ——", True, (170, 190, 215))
-    sub_rect = sub_surf.get_rect(center=(cx, cy - 198))
+    sub_rect = sub_surf.get_rect(center=(cx, cy - 238))
     screen.blit(sub_surf, sub_rect)
 
     card_w = 560
 
     # 2. 模式 1 按钮：自由模式 (Free Mode)
-    btn1_h = 56
-    btn1_rect = pygame.Rect(cx - card_w // 2, cy - 215, card_w, btn1_h)
+    btn1_h = 48
+    btn1_rect = pygame.Rect(cx - card_w // 2, cy - 222, card_w, btn1_h)
     hover1 = btn1_rect.collidepoint(mouse_pos)
 
     bg_color1 = (32, 48, 74) if hover1 else (22, 32, 52)
@@ -1213,14 +1313,14 @@ def _draw_main_menu(
     pygame.draw.rect(screen, border_color1, btn1_rect, width=2 if hover1 else 1, border_radius=10)
 
     t1 = font.render("🌟 1. 自由模式 (Free Mode)", True, (255, 240, 150) if hover1 else (230, 235, 245))
-    screen.blit(t1, (btn1_rect.x + 18, btn1_rect.y + 6))
+    screen.blit(t1, (btn1_rect.x + 18, btn1_rect.y + 4))
 
     desc1 = font.render("按 [1] 键或点击 | 1~10 阶自由切换，无限切关与随心练习", True, (160, 180, 205))
-    screen.blit(desc1, (btn1_rect.x + 18, btn1_rect.y + 30))
+    screen.blit(desc1, (btn1_rect.x + 18, btn1_rect.y + 26))
 
     # 3. 模式 2 按钮：闯关模式 (Challenge Mode)
-    btn2_h = 56
-    btn2_rect = pygame.Rect(cx - card_w // 2, cy - 153, card_w, btn2_h)
+    btn2_h = 48
+    btn2_rect = pygame.Rect(cx - card_w // 2, cy - 168, card_w, btn2_h)
     hover2 = btn2_rect.collidepoint(mouse_pos)
 
     bg_color2 = (32, 48, 74) if hover2 else (22, 32, 52)
@@ -1229,14 +1329,14 @@ def _draw_main_menu(
     pygame.draw.rect(screen, border_color2, btn2_rect, width=2 if hover2 else 1, border_radius=10)
 
     t2 = font.render("🏆 2. 闯关模式 (Challenge Mode)", True, (255, 220, 90) if hover2 else (230, 235, 245))
-    screen.blit(t2, (btn2_rect.x + 18, btn2_rect.y + 6))
+    screen.blit(t2, (btn2_rect.x + 18, btn2_rect.y + 4))
 
-    desc2 = font.render("按 [2] 键或点击 | 森林 + 地牢 + 秘境 + 异形 + 立交 共 50 关连续大满贯", True, (160, 180, 205))
-    screen.blit(desc2, (btn2_rect.x + 18, btn2_rect.y + 30))
+    desc2 = font.render("按 [2] 键或点击 | 森林 + 地牢 + 秘境 + 异形 + 立交 + 提示词 共 60 关连续大满贯", True, (160, 180, 205))
+    screen.blit(desc2, (btn2_rect.x + 18, btn2_rect.y + 26))
 
-    # 4. 卡片 3：🎯 调试/自由选关卡片 (五大关 50 阶)
-    lvl_card_h = 166
-    lvl_card = pygame.Rect(cx - card_w // 2, cy - 91, card_w, lvl_card_h)
+    # 4. 卡片 3：🎯 调试/自由选关卡片 (六大关 60 阶)
+    lvl_card_h = 192
+    lvl_card = pygame.Rect(cx - card_w // 2, cy - 114, card_w, lvl_card_h)
     pygame.draw.rect(screen, (22, 32, 50), lvl_card, border_radius=10)
     pygame.draw.rect(screen, (60, 90, 140), lvl_card, width=1, border_radius=10)
 
@@ -1312,14 +1412,28 @@ def _draw_main_menu(
         ts = small_font.render(str(i), True, (255, 240, 150) if h_l else (210, 235, 250))
         screen.blit(ts, ts.get_rect(center=brect.center))
 
+    # 第六大关选关 (1~10 阶)
+    lbl6 = small_font.render("🔤 第六大关 (提示词阵):", True, (100, 240, 255))
+    screen.blit(lbl6, (lvl_card.x + 14, lvl_card.y + 163))
+    for i in range(1, 11):
+        bx = lvl_card.x + 200 + (i - 1) * 34
+        by = lvl_card.y + 161
+        brect = pygame.Rect(bx, by, 30, 24)
+        menu_level_rects[(6, i)] = brect
+        h_l = brect.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (22, 60, 80) if h_l else (16, 40, 58), brect, border_radius=4)
+        pygame.draw.rect(screen, (100, 240, 255) if h_l else (50, 150, 180), brect, width=1, border_radius=4)
+        ts = small_font.render(str(i), True, (255, 240, 150) if h_l else (210, 245, 255))
+        screen.blit(ts, ts.get_rect(center=brect.center))
+
     # 5. 卡片 4：🎵 声音大小设置 (Sound Volume Settings)
-    c3_h = 112
-    c3_rect = pygame.Rect(cx - card_w // 2, cy + 81, card_w, c3_h)
+    c3_h = 106
+    c3_rect = pygame.Rect(cx - card_w // 2, cy + 84, card_w, c3_h)
     pygame.draw.rect(screen, (22, 32, 50), c3_rect, border_radius=10)
     pygame.draw.rect(screen, (60, 90, 140), c3_rect, width=1, border_radius=10)
 
     v_title = font.render("🎵 声音大小设置", True, (255, 220, 90))
-    screen.blit(v_title, (c3_rect.x + 16, c3_rect.y + 8))
+    screen.blit(v_title, (c3_rect.x + 16, c3_rect.y + 6))
 
     def _draw_vol_row(
         label_text: str, y_pos: int, vol_val: float
@@ -1376,8 +1490,8 @@ def _draw_main_menu(
     }
 
     # 6. 卡片 5：底部荣耀纪录卡片 (Statistics Card)
-    card4_h = 68
-    card4_rect = pygame.Rect(cx - card_w // 2, cy + 175, card_w, card4_h)
+    card4_h = 62
+    card4_rect = pygame.Rect(cx - card_w // 2, cy + 196, card_w, card4_h)
     pygame.draw.rect(screen, (18, 26, 40), card4_rect, border_radius=10)
     pygame.draw.rect(screen, (40, 58, 88), card4_rect, width=1, border_radius=10)
 
@@ -1831,7 +1945,8 @@ def _draw(
     total_items_count: int = 0,
     gate_locked_tip_timer: float = 0.0,
     win_path: list[tuple[int, int]] | None = None,
-) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect, pygame.Rect]:
+    sidebar_scroll_y: float = 0.0,
+) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect, pygame.Rect, float]:
     if current_world == 6:
         # 第六大关：提示词隐语阵 (深邃青蓝底色、霓虹冰蓝墙体、高亮字形通路)
         cur_bg = (10, 20, 30)
@@ -1991,7 +2106,7 @@ def _draw(
             )
             pygame.draw.rect(screen, color, rect)
             if rect.w >= 4 and rect.h >= 4:
-                scaled_surf = pygame.transform.smoothscale(surf, (rect.w, rect.h))
+                scaled_surf = _get_scaled_surf(surf, rect.w, rect.h)
                 screen.blit(scaled_surf, rect.topleft)
 
             # 出口小屋锁头 🔒 / 通关光环 🔓 绘制
@@ -2195,6 +2310,7 @@ def _draw(
         total_items_count,
         gate_locked_tip_timer,
         win_path,
+        sidebar_scroll_y,
     )
 
 
@@ -2228,40 +2344,44 @@ def _draw_sidebar(
     total_items_count: int = 0,
     gate_locked_tip_timer: float = 0.0,
     win_path: list[tuple[int, int]] | None = None,
-) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect, pygame.Rect]:
+    sidebar_scroll_y: float = 0.0,
+) -> tuple[dict[tuple[int, int], pygame.Rect], pygame.Rect, pygame.Rect, float]:
     """右侧独立记分牌面板：包含总得分、关卡分值、调试选关按钮、计时纪录与提示卡片。"""
     sw, sh = screen.get_size()
     sb_x = sw - SIDEBAR_WIDTH
     sb_w = SIDEBAR_WIDTH
 
-    # 专门为侧边栏定义的精致字体大小，防止文字超出卡片边界
-    f_title = _font(15)
-    f_body = _font(14)
-    f_small = _font(13)
-    f_tiny = _font(12)
-    f_banner = _font(19)
+    f_title = _font(14)
+    f_body = _font(13)
+    f_small = _font(12)
+    f_tiny = _font(11)
+    f_banner = _font(17)
 
     # 1. 侧边栏整体背景与左分隔线
     sidebar_rect = pygame.Rect(sb_x, 0, sb_w, sh)
     pygame.draw.rect(screen, (16, 22, 34), sidebar_rect)
     pygame.draw.line(screen, (38, 52, 74), (sb_x, 0), (sb_x, sh), 2)
 
+    total_content_h = 710.0
+    max_scroll_y = max(0.0, total_content_h - sh + 12.0)
+    scroll_y = max(0.0, min(max_scroll_y, sidebar_scroll_y))
+
     pad_x = sb_x + 10
     card_w = sb_w - 20
-    cur_y = 10
+    cur_y = 8 - int(scroll_y)
 
     # --- 卡片 1: 🏆 记分牌 (Scoreboard) ---
-    c1_rect = pygame.Rect(pad_x, cur_y, card_w, 88)
+    c1_rect = pygame.Rect(pad_x, cur_y, card_w, 76)
     pygame.draw.rect(screen, (24, 34, 52), c1_rect, border_radius=8)
     pygame.draw.rect(screen, (48, 68, 98), c1_rect, width=1, border_radius=8)
 
     stage_idx = (current_world - 1) * 10 + difficulty_level
     t_mode_str = "🌟 自由模式" if game_mode == "free" else f"🏆 闯关模式 ({stage_idx}/60关)"
     t_title = f_title.render(f"模式: {t_mode_str}", True, (255, 220, 80))
-    screen.blit(t_title, (pad_x + 10, cur_y + 8))
+    screen.blit(t_title, (pad_x + 10, cur_y + 6))
 
     t_total = f_body.render(f"累计总得分: {total_score:,} 分", True, (255, 240, 150))
-    screen.blit(t_total, (pad_x + 10, cur_y + 34))
+    screen.blit(t_total, (pad_x + 10, cur_y + 28))
 
     if game_mode == "free":
         if last_round_score > 0:
@@ -2273,12 +2393,12 @@ def _draw_sidebar(
             t_last = f_body.render("本局得分: --", True, (180, 190, 205))
     else:
         t_last = f_body.render(f"闯关累计得分: {challenge_total_score:,} 分", True, (120, 240, 160))
-    screen.blit(t_last, (pad_x + 10, cur_y + 58))
+    screen.blit(t_last, (pad_x + 10, cur_y + 50))
 
-    cur_y += 96
+    cur_y += 82
 
     # --- 卡片 2: 📊 关卡分值与大关主题 (Level & World Info) ---
-    c2_rect = pygame.Rect(pad_x, cur_y, card_w, 92)
+    c2_rect = pygame.Rect(pad_x, cur_y, card_w, 70)
     pygame.draw.rect(screen, (24, 34, 52), c2_rect, border_radius=8)
     pygame.draw.rect(screen, (48, 68, 98), c2_rect, width=1, border_radius=8)
 
@@ -2302,7 +2422,7 @@ def _draw_sidebar(
         world_color = (130, 230, 150)
 
     t_world = f_title.render(world_title, True, world_color)
-    screen.blit(t_world, (pad_x + 10, cur_y + 8))
+    screen.blit(t_world, (pad_x + 10, cur_y + 6))
 
     base_pts = (current_world - 1) * 1000 + difficulty_level * 100
     rec_pts = base_pts * 2
@@ -2317,13 +2437,13 @@ def _draw_sidebar(
         t_lvl = f_body.render(f"闯关进度: 第 {stage_idx} / 60 关", True, (220, 230, 245))
         t_pts = f_small.render(f"本阶得分: +{base_pts} 分 (破纪录加倍)", True, (160, 210, 255))
 
-    screen.blit(t_lvl, (pad_x + 10, cur_y + 34))
-    screen.blit(t_pts, (pad_x + 10, cur_y + 60))
+    screen.blit(t_lvl, (pad_x + 10, cur_y + 26))
+    screen.blit(t_pts, (pad_x + 10, cur_y + 48))
 
-    cur_y += 100
+    cur_y += 76
 
     # --- 卡片 2.5: 🎒 支线任务道具收集 (Item Quest Card) ---
-    c_item_rect = pygame.Rect(pad_x, cur_y, card_w, 66)
+    c_item_rect = pygame.Rect(pad_x, cur_y, card_w, 52)
     pygame.draw.rect(screen, (24, 34, 52), c_item_rect, border_radius=8)
     pygame.draw.rect(screen, (48, 68, 98), c_item_rect, width=1, border_radius=8)
 
@@ -2338,143 +2458,65 @@ def _draw_sidebar(
         t_q_title = f_title.render(f"🎒 支线: {item_info['icon']}{item_info['name']} 收集 ({col_count}/{total_items_count})", True, (255, 220, 90))
         t_q_status = f_small.render(f"已收集: {col_count} 个 | 还有 {rem_count} 个未收集", True, (255, 200, 120))
 
-    screen.blit(t_q_title, (pad_x + 10, cur_y + 8))
-    screen.blit(t_q_status, (pad_x + 10, cur_y + 36))
+    screen.blit(t_q_title, (pad_x + 10, cur_y + 5))
+    screen.blit(t_q_status, (pad_x + 10, cur_y + 28))
 
-    cur_y += 74
+    cur_y += 58
 
     # --- 卡片 3: 🎯 调试选关按钮 (Level Select Card - 60 关) ---
-    c3_rect = pygame.Rect(pad_x, cur_y, card_w, 194)
+    c3_rect = pygame.Rect(pad_x, cur_y, card_w, 172)
     pygame.draw.rect(screen, (24, 34, 52), c3_rect, border_radius=8)
     pygame.draw.rect(screen, (48, 68, 98), c3_rect, width=1, border_radius=8)
 
     t_sel_title = f_small.render("🎯 调试选关按钮 (点击直跳关卡):", True, (255, 220, 90))
-    screen.blit(t_sel_title, (pad_x + 10, cur_y + 6))
+    screen.blit(t_sel_title, (pad_x + 10, cur_y + 4))
 
     sidebar_level_rects: dict[tuple[int, int], pygame.Rect] = {}
 
-    # 第一大关 1~10 🌲
-    lbl_w1 = f_tiny.render("🌲W1", True, (130, 230, 150))
-    screen.blit(lbl_w1, (pad_x + 6, cur_y + 30))
-    for lvl in range(1, 11):
-        bx = pad_x + 46 + (lvl - 1) * 20
-        by = cur_y + 28
-        brect = pygame.Rect(bx, by, 18, 22)
-        sidebar_level_rects[(1, lvl)] = brect
+    world_rows = [
+        (1, "🌲W1", (130, 230, 150), 24),
+        (2, "🏰W2", (255, 130, 130), 48),
+        (3, "🌟W3", (210, 140, 255), 72),
+        (4, "🌀W4", (100, 230, 220), 96),
+        (5, "🌉W5", (120, 220, 255), 120),
+        (6, "🔤W6", (100, 240, 255), 144),
+    ]
 
-        is_active = (current_world == 1 and lvl == difficulty_level)
-        bg_c = (38, 88, 56) if is_active else (22, 48, 34)
-        border_c = (255, 220, 80) if is_active else (60, 130, 80)
-
-        pygame.draw.rect(screen, bg_c, brect, border_radius=3)
-        pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
-
-        txt_s = f_tiny.render(str(lvl), True, (255, 240, 150) if is_active else (210, 225, 235))
-        screen.blit(txt_s, txt_s.get_rect(center=brect.center))
-
-    # 第二大关 1~10 🏰
-    lbl_w2 = f_tiny.render("🏰W2", True, (255, 130, 130))
-    screen.blit(lbl_w2, (pad_x + 6, cur_y + 58))
-    for lvl in range(1, 11):
-        bx = pad_x + 46 + (lvl - 1) * 20
-        by = cur_y + 56
-        brect = pygame.Rect(bx, by, 18, 22)
-        sidebar_level_rects[(2, lvl)] = brect
-
-        is_active = (current_world == 2 and lvl == difficulty_level)
-        bg_c = (98, 38, 52) if is_active else (56, 22, 32)
-        border_c = (255, 220, 80) if is_active else (180, 60, 80)
-
-        pygame.draw.rect(screen, bg_c, brect, border_radius=3)
-        pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
-
-        txt_s = f_tiny.render(str(lvl), True, (255, 240, 150) if is_active else (235, 210, 220))
-        screen.blit(txt_s, txt_s.get_rect(center=brect.center))
-
-    # 第三大关 1~10 🌟
-    lbl_w3 = f_tiny.render("🌟W3", True, (210, 140, 255))
-    screen.blit(lbl_w3, (pad_x + 6, cur_y + 86))
-    for lvl in range(1, 11):
-        bx = pad_x + 46 + (lvl - 1) * 20
-        by = cur_y + 84
-        brect = pygame.Rect(bx, by, 18, 22)
-        sidebar_level_rects[(3, lvl)] = brect
-
-        is_active = (current_world == 3 and lvl == difficulty_level)
-        bg_c = (88, 38, 108) if is_active else (48, 22, 62)
-        border_c = (255, 220, 80) if is_active else (140, 60, 180)
-
-        pygame.draw.rect(screen, bg_c, brect, border_radius=3)
-        pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
-
-        txt_s = f_tiny.render(str(lvl), True, (255, 240, 150) if is_active else (235, 210, 250))
-        screen.blit(txt_s, txt_s.get_rect(center=brect.center))
-
-    # 第四大关 1~10 🌀
-    lbl_w4 = f_tiny.render("🌀W4", True, (100, 230, 220))
-    screen.blit(lbl_w4, (pad_x + 6, cur_y + 114))
-    for lvl in range(1, 11):
-        bx = pad_x + 46 + (lvl - 1) * 20
-        by = cur_y + 112
-        brect = pygame.Rect(bx, by, 18, 22)
-        sidebar_level_rects[(4, lvl)] = brect
-
-        is_active = (current_world == 4 and lvl == difficulty_level)
-        bg_c = (38, 98, 98) if is_active else (22, 56, 56)
-        border_c = (255, 220, 80) if is_active else (60, 160, 150)
-
-        pygame.draw.rect(screen, bg_c, brect, border_radius=3)
-        pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
-
-        txt_s = f_tiny.render(str(lvl), True, (255, 240, 150) if is_active else (210, 245, 240))
-        screen.blit(txt_s, txt_s.get_rect(center=brect.center))
-
-    # 第五大关 1~10 🌉
-    lbl_w5 = f_tiny.render("🌉W5", True, (120, 220, 255))
-    screen.blit(lbl_w5, (pad_x + 6, cur_y + 140))
-    for lvl in range(1, 11):
-        bx = pad_x + 46 + (lvl - 1) * 20
-        by = cur_y + 138
-        brect = pygame.Rect(bx, by, 18, 22)
-        sidebar_level_rects[(5, lvl)] = brect
-
-        is_active = (current_world == 5 and lvl == difficulty_level)
-        bg_c = (38, 78, 108) if is_active else (22, 44, 68)
-        border_c = (255, 220, 80) if is_active else (60, 140, 180)
-
-        pygame.draw.rect(screen, bg_c, brect, border_radius=3)
-        pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
-
-        txt_s = f_tiny.render(str(lvl), True, (255, 240, 150) if is_active else (210, 235, 250))
-        screen.blit(txt_s, txt_s.get_rect(center=brect.center))
-
-    # 第六大关 1~10 🔤
-    lbl_w6 = f_tiny.render("🔤W6", True, (100, 240, 255))
-    screen.blit(lbl_w6, (pad_x + 6, cur_y + 166))
     w6_letters_short = ["K", "E", "E", "P", "G", "O", "I", "N", "G", "!"]
-    for lvl in range(1, 11):
-        bx = pad_x + 46 + (lvl - 1) * 20
-        by = cur_y + 164
-        brect = pygame.Rect(bx, by, 18, 22)
-        sidebar_level_rects[(6, lvl)] = brect
 
-        is_active = (current_world == 6 and lvl == difficulty_level)
-        is_cleared = f"6_{lvl}" in best_records or (won and current_world == 6 and difficulty_level == lvl)
+    for w_idx, tag, tag_color, offset_y_pos in world_rows:
+        lbl = f_tiny.render(tag, True, tag_color)
+        screen.blit(lbl, (pad_x + 6, cur_y + offset_y_pos + 2))
+        for lvl in range(1, 11):
+            bx = pad_x + 44 + (lvl - 1) * 21
+            by = cur_y + offset_y_pos
+            brect = pygame.Rect(bx, by, 19, 20)
+            sidebar_level_rects[(w_idx, lvl)] = brect
 
-        bg_c = (20, 90, 120) if is_active else ((24, 60, 85) if is_cleared else (14, 48, 68))
-        border_c = (255, 220, 80) if is_active else ((0, 220, 200) if is_cleared else (40, 160, 200))
+            is_active = (current_world == w_idx and lvl == difficulty_level)
+            is_cleared = (w_idx == 6 and (f"6_{lvl}" in best_records or (won and current_world == 6 and difficulty_level == lvl)))
 
-        pygame.draw.rect(screen, bg_c, brect, border_radius=3)
-        pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
+            if is_active:
+                bg_c = (38, 88, 56) if w_idx == 1 else ((98, 38, 52) if w_idx == 2 else ((88, 38, 108) if w_idx == 3 else ((38, 98, 98) if w_idx == 4 else ((38, 78, 108) if w_idx == 5 else (20, 90, 120)))))
+                border_c = (255, 220, 80)
+            elif is_cleared:
+                bg_c = (24, 60, 85)
+                border_c = (0, 220, 200)
+            else:
+                bg_c = (22, 48, 34) if w_idx == 1 else ((56, 22, 32) if w_idx == 2 else ((48, 22, 62) if w_idx == 3 else ((22, 56, 56) if w_idx == 4 else ((22, 44, 68) if w_idx == 5 else (14, 48, 68)))))
+                border_c = (60, 130, 80) if w_idx == 1 else ((180, 60, 80) if w_idx == 2 else ((140, 60, 180) if w_idx == 3 else ((60, 160, 150) if w_idx == 4 else ((60, 140, 180) if w_idx == 5 else (40, 160, 200)))))
 
-        btn_str = w6_letters_short[lvl - 1] if is_cleared else str(lvl)
-        txt_s = f_tiny.render(btn_str, True, (255, 240, 150) if is_active else ((255, 230, 120) if is_cleared else (200, 240, 255)))
-        screen.blit(txt_s, txt_s.get_rect(center=brect.center))
+            pygame.draw.rect(screen, bg_c, brect, border_radius=3)
+            pygame.draw.rect(screen, border_c, brect, width=2 if is_active else 1, border_radius=3)
 
-    cur_y += 204
+            btn_str = w6_letters_short[lvl - 1] if (w_idx == 6 and is_cleared) else str(lvl)
+            txt_s = f_tiny.render(btn_str, True, (255, 240, 150) if is_active else ((255, 230, 120) if is_cleared else (210, 230, 245)))
+            screen.blit(txt_s, txt_s.get_rect(center=brect.center))
+
+    cur_y += 178
 
     # --- 🧭 自动寻路按钮 ---
-    btn_auto_rect = pygame.Rect(pad_x, cur_y, card_w, 30)
+    btn_auto_rect = pygame.Rect(pad_x, cur_y, card_w, 26)
     hover_auto = btn_auto_rect.collidepoint(pygame.mouse.get_pos())
     if show_auto_path:
         bg_a = (20, 80, 100) if hover_auto else (15, 60, 80)
@@ -2487,51 +2529,51 @@ def _draw_sidebar(
             txt_str = f"🧭 生成通关路线中... ({progress}%)"
         else:
             txt_str = "🧭 自动寻路：已开启 [点击隐藏路线]"
-        txt_a = font.render(txt_str, True, (200, 250, 255))
+        txt_a = f_body.render(txt_str, True, (200, 250, 255))
     else:
         bg_a = (38, 52, 74) if hover_auto else (24, 34, 52)
         border_a = (100, 180, 255) if hover_auto else (48, 68, 98)
-        txt_a = font.render("🧭 自动寻路：已关闭 [点击演示过程]", True, (220, 235, 245))
+        txt_a = f_body.render("🧭 自动寻路：已关闭 [点击演示过程]", True, (220, 235, 245))
 
     pygame.draw.rect(screen, bg_a, btn_auto_rect, border_radius=6)
     pygame.draw.rect(screen, border_a, btn_auto_rect, width=2 if (hover_auto or show_auto_path) else 1, border_radius=6)
     screen.blit(txt_a, txt_a.get_rect(center=btn_auto_rect.center))
 
-    cur_y += 36
+    cur_y += 31
 
     # --- 🔍 视角模式切换按钮 ---
-    btn_view_rect = pygame.Rect(pad_x, cur_y, card_w, 30)
+    btn_view_rect = pygame.Rect(pad_x, cur_y, card_w, 26)
     hover_view = btn_view_rect.collidepoint(pygame.mouse.get_pos())
     is_following = camera.following_player if camera is not None else False
     if is_following:
         bg_v = (20, 80, 70) if hover_view else (15, 60, 52)
         border_v = (0, 240, 200)
-        txt_v = font.render("🔍 视角: 地图放大 [点击还原全景]", True, (200, 250, 240))
+        txt_v = f_body.render("🔍 视角: 地图放大 [点击还原全景]", True, (200, 250, 240))
     else:
         bg_v = (38, 52, 74) if hover_view else (24, 34, 52)
         border_v = (100, 180, 255) if hover_view else (48, 68, 98)
-        txt_v = font.render("🔍 视角: 全景还原 [点击放大跟随]", True, (220, 235, 245))
+        txt_v = f_body.render("🔍 视角: 全景还原 [点击放大跟随]", True, (220, 235, 245))
 
     pygame.draw.rect(screen, bg_v, btn_view_rect, border_radius=6)
     pygame.draw.rect(screen, border_v, btn_view_rect, width=2 if (hover_view or is_following) else 1, border_radius=6)
     screen.blit(txt_v, txt_v.get_rect(center=btn_view_rect.center))
 
-    cur_y += 38
+    cur_y += 32
 
     # --- 卡片 3.5: 📜 提示词集锦 (KEEP GOING!) ---
-    w6_card_h = 70
+    w6_card_h = 60
     w6_rect = pygame.Rect(pad_x, cur_y, card_w, w6_card_h)
     pygame.draw.rect(screen, (20, 36, 52), w6_rect, border_radius=8)
     pygame.draw.rect(screen, (40, 120, 160), w6_rect, width=1, border_radius=8)
 
     lbl_w6_title = f_tiny.render("📜 提示词阵收集 [ KEEP GOING! ]", True, (100, 240, 255))
-    screen.blit(lbl_w6_title, (pad_x + 8, cur_y + 6))
+    screen.blit(lbl_w6_title, (pad_x + 8, cur_y + 4))
 
     w6_letters = ["K", "E", "E", "P", "G", "O", "I", "N", "G", "!"]
-    slot_w = 18
-    slot_h = 24
+    slot_w = 19
+    slot_h = 20
     slot_start_x = pad_x + 8
-    slot_y = cur_y + 24
+    slot_y = cur_y + 18
 
     collected_count = 0
     for idx in range(10):
@@ -2541,7 +2583,7 @@ def _draw_sidebar(
         if is_collected:
             collected_count += 1
 
-        bx = slot_start_x + idx * (slot_w + 3)
+        bx = slot_start_x + idx * (slot_w + 4)
         srect = pygame.Rect(bx, slot_y, slot_w, slot_h)
 
         is_current = (current_world == 6 and difficulty_level == lvl_num)
@@ -2565,12 +2607,12 @@ def _draw_sidebar(
         prog_txt = f_tiny.render("✨ 10/10 全满贯拼齐! 永不放弃！", True, (255, 235, 100))
     else:
         prog_txt = f_tiny.render(f"收集进度: {collected_count}/10 关 (通关解锁)", True, (160, 210, 235))
-    screen.blit(prog_txt, (pad_x + 8, cur_y + 51))
+    screen.blit(prog_txt, (pad_x + 8, cur_y + 42))
 
-    cur_y += w6_card_h + 8
+    cur_y += 66
 
     # --- 卡片 4: ⏱️ 计时 & 纪录 (Timer & Record) ---
-    c3_rect = pygame.Rect(pad_x, cur_y, card_w, 72)
+    c3_rect = pygame.Rect(pad_x, cur_y, card_w, 56)
     pygame.draw.rect(screen, (24, 34, 52), c3_rect, border_radius=8)
     pygame.draw.rect(screen, (48, 68, 98), c3_rect, width=1, border_radius=8)
 
@@ -2586,13 +2628,13 @@ def _draw_sidebar(
         t_time = f_body.render(f"本关用时: {time_str}", True, (255, 230, 140) if timer_started else (170, 180, 195))
         t_best = f_body.render(f"闯关累计用时: {challenge_total_time:.2f} 秒", True, (180, 220, 255))
 
-    screen.blit(t_time, (pad_x + 10, cur_y + 10))
-    screen.blit(t_best, (pad_x + 10, cur_y + 38))
+    screen.blit(t_time, (pad_x + 10, cur_y + 6))
+    screen.blit(t_best, (pad_x + 10, cur_y + 28))
 
-    cur_y += 82
+    cur_y += 62
 
     # --- 卡片 5: 💬 游戏状态与过关/被抓提示 (Status Banner) ---
-    c4_h = 135
+    c4_h = 106
     c4_rect = pygame.Rect(pad_x, cur_y, card_w, c4_h)
 
     if game_mode == "challenge" and challenge_completed:
@@ -2604,10 +2646,10 @@ def _draw_sidebar(
         st3 = f_body.render(f"获得全通总分: +{challenge_total_score:,} 分", True, (255, 220, 100))
         st4 = f_body.render("👉 按 R 重测，按 M 返回主菜单", True, (255, 240, 180))
 
-        screen.blit(st1, (pad_x + 10, cur_y + 8))
-        screen.blit(st2, (pad_x + 10, cur_y + 38))
-        screen.blit(st3, (pad_x + 10, cur_y + 64))
-        screen.blit(st4, (pad_x + 10, cur_y + 94))
+        screen.blit(st1, (pad_x + 10, cur_y + 6))
+        screen.blit(st2, (pad_x + 10, cur_y + 30))
+        screen.blit(st3, (pad_x + 10, cur_y + 52))
+        screen.blit(st4, (pad_x + 10, cur_y + 76))
 
     elif won:
         pygame.draw.rect(screen, (38, 78, 52), c4_rect, border_radius=8)
@@ -2635,10 +2677,10 @@ def _draw_sidebar(
                 next_str = f"第5大关 {difficulty_level + 1}阶" if difficulty_level < 10 else "第1大关 1阶"
             st4 = f_body.render(f"👉 按 R/空格/点击进入 {next_str}", True, (255, 240, 180))
 
-        screen.blit(st1, (pad_x + 12, cur_y + 8))
-        screen.blit(st2, (pad_x + 12, cur_y + 40))
-        screen.blit(st3, (pad_x + 12, cur_y + 64))
-        screen.blit(st4, (pad_x + 12, cur_y + 94))
+        screen.blit(st1, (pad_x + 10, cur_y + 6))
+        screen.blit(st2, (pad_x + 10, cur_y + 30))
+        screen.blit(st3, (pad_x + 10, cur_y + 52))
+        screen.blit(st4, (pad_x + 10, cur_y + 76))
 
     elif caught_by_wolf:
         pygame.draw.rect(screen, (110, 28, 36), c4_rect, border_radius=8)
@@ -2649,10 +2691,10 @@ def _draw_sidebar(
         st3 = f_body.render("被大灰狼追上了...", True, (230, 190, 190))
         st4 = f_body.render("👉 按 R 重新尝试本关", True, (255, 240, 180))
 
-        screen.blit(st1, (pad_x + 10, cur_y + 8))
-        screen.blit(st2, (pad_x + 10, cur_y + 38))
-        screen.blit(st3, (pad_x + 10, cur_y + 64))
-        screen.blit(st4, (pad_x + 10, cur_y + 94))
+        screen.blit(st1, (pad_x + 10, cur_y + 6))
+        screen.blit(st2, (pad_x + 10, cur_y + 30))
+        screen.blit(st3, (pad_x + 10, cur_y + 52))
+        screen.blit(st4, (pad_x + 10, cur_y + 76))
 
     else:
         pygame.draw.rect(screen, (24, 34, 52), c4_rect, border_radius=8)
@@ -2669,35 +2711,27 @@ def _draw_sidebar(
             st3 = f_body.render("顺序挑战 50 阶全部迷宫", True, (190, 200, 215))
             st4 = f_body.render("创造最快全通时间与高分！", True, (170, 180, 200))
 
-        screen.blit(st1, (pad_x + 10, cur_y + 12))
-        screen.blit(st2, (pad_x + 10, cur_y + 38))
-        screen.blit(st3, (pad_x + 10, cur_y + 64))
-        screen.blit(st4, (pad_x + 10, cur_y + 90))
+        screen.blit(st1, (pad_x + 10, cur_y + 6))
+        screen.blit(st2, (pad_x + 10, cur_y + 30))
+        screen.blit(st3, (pad_x + 10, cur_y + 52))
+        screen.blit(st4, (pad_x + 10, cur_y + 76))
 
-    cur_y += c4_h + 10
+    cur_y += c4_h + 8
 
-    # --- 卡片 6: 🕹️ 操作快捷键 (Controls) ---
-    c5_h = max(110, sh - cur_y - 10)
-    c5_rect = pygame.Rect(pad_x, cur_y, card_w, c5_h)
-    pygame.draw.rect(screen, (20, 28, 44), c5_rect, border_radius=8)
-    pygame.draw.rect(screen, (38, 52, 78), c5_rect, width=1, border_radius=8)
+    # 滚动条指示器
+    if max_scroll_y > 0.0:
+        bar_x = sb_x + sb_w - 5
+        bar_h = sh - 16
+        thumb_h = max(24, int(bar_h * (sh / total_content_h)))
+        thumb_y = 8 + int((bar_h - thumb_h) * (scroll_y / max_scroll_y))
+        pygame.draw.rect(screen, (35, 50, 75), (bar_x, 8, 3, bar_h), border_radius=2)
+        pygame.draw.rect(screen, (90, 170, 230), (bar_x, thumb_y, 3, thumb_h), border_radius=2)
 
-    t_ctrl_title = f_title.render("🕹️ 快捷键指南", True, (180, 200, 220))
-    screen.blit(t_ctrl_title, (pad_x + 10, cur_y + 8))
+    return sidebar_level_rects, btn_auto_rect, btn_view_rect, max_scroll_y
 
-    ctrl_lines = [
-        "M / ESC : 返回模式菜单",
-        "WASD / 方向键 : 移动小人",
-        "R : 重生成/下关 | P : 换外观",
-        "F : 召唤狼 | H : 自动寻路",
-        "C / Space : 切换视角",
-    ]
-    for i, line in enumerate(ctrl_lines):
-        t_l = f_small.render(line, True, (140, 155, 175))
-        screen.blit(t_l, (pad_x + 10, cur_y + 28 + i * 19))
-        screen.blit(t_l, (pad_x + 10, cur_y + 28 + i * 20))
 
-    return sidebar_level_rects, btn_auto_rect, btn_view_rect
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":

@@ -364,26 +364,34 @@ class MazeData:
 		var val = grid[tile_y][tile_x]
 		if val == WALL:
 			return true
-		if val == OVERPASS_NS:
-			if current_layer == "ns_bridge":
-				if not is_y_axis:
-					return true # 南北桥面上：禁止东西向移动（被桥两侧护栏挡住）
+		if val == OVERPASS_NS or val == OVERPASS_EW:
+			if player_pos != Vector2.ZERO:
+				var pcx = int(player_pos.x / cell_size)
+				var pcy = int(player_pos.y / cell_size)
+				if pcx == tile_x and pcy == tile_y:
+					if val == OVERPASS_NS:
+						if current_layer == "ns_bridge":
+							return not is_y_axis
+						elif current_layer == "ew_tunnel":
+							return is_y_axis
+						return false
+					else:
+						if current_layer == "ew_bridge":
+							return is_y_axis
+						elif current_layer == "ns_tunnel":
+							return not is_y_axis
+						return false
+				elif pcx == tile_x and pcy != tile_y:
+					# 玩家中心在过街楼正上方或正下方 (南北方向轴上)：交互只能沿南北通道！
+					return not is_y_axis
+				elif pcy == tile_y and pcx != tile_x:
+					# 玩家中心在过街楼正左方或正右方 (东西方向轴上)：交互只能沿东西通道！
+					return is_y_axis
+				else:
+					# 斜角切入，禁止穿透护栏
+					return true
+			else:
 				return false
-			elif current_layer == "ew_tunnel":
-				if is_y_axis:
-					return true # 东西隧道内：禁止南北向移动（被隧道侧水泥墙挡住）
-				return false
-			return false
-		elif val == OVERPASS_EW:
-			if current_layer == "ew_bridge":
-				if is_y_axis:
-					return true # 东西桥面上：禁止南北向移动（被桥两侧护栏挡住）
-				return false
-			elif current_layer == "ns_tunnel":
-				if not is_y_axis:
-					return true # 南北隧道内：禁止东西向移动（被隧道侧水泥墙挡住）
-				return false
-			return false
 		return false
 
 	func solve_path() -> Array[Vector2i]:

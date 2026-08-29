@@ -416,26 +416,34 @@ class Maze:
         val = self.grid[tile_y][tile_x]
         if val == WALL:
             return True
-        if val == OVERPASS_NS:
-            if current_layer == "ns_bridge":
-                if not is_y_axis:
-                    return True # 南北桥面上：禁止东西向移动（被桥两侧护栏挡住）
+        if val in (OVERPASS_NS, OVERPASS_EW):
+            if player_x is not None and player_y is not None:
+                pcx = int(player_x // cell_size)
+                pcy = int(player_y // cell_size)
+                if pcx == tile_x and pcy == tile_y:
+                    if val == OVERPASS_NS:
+                        if current_layer == "ns_bridge":
+                            return not is_y_axis
+                        elif current_layer == "ew_tunnel":
+                            return is_y_axis
+                        return False
+                    else:  # OVERPASS_EW
+                        if current_layer == "ew_bridge":
+                            return is_y_axis
+                        elif current_layer == "ns_tunnel":
+                            return not is_y_axis
+                        return False
+                elif pcx == tile_x and pcy != tile_y:
+                    # 玩家中心在过街楼的正上方或正下方 (南北方向轴上)：交互只能沿南北通道！
+                    return not is_y_axis
+                elif pcy == tile_y and pcx != tile_x:
+                    # 玩家中心在过街楼的正左方或正右方 (东西方向轴上)：交互只能沿东西通道！
+                    return is_y_axis
+                else:
+                    # 位于斜角邻居瓦片，禁止斜向切入立交桥护栏
+                    return True
+            else:
                 return False
-            elif current_layer == "ew_tunnel":
-                if is_y_axis:
-                    return True # 东西隧道内：禁止南北向移动（被隧道侧水泥墙挡住）
-                return False
-            return False
-        elif val == OVERPASS_EW:
-            if current_layer == "ew_bridge":
-                if is_y_axis:
-                    return True # 东西桥面上：禁止南北向移动（被桥两侧护栏挡住）
-                return False
-            elif current_layer == "ns_tunnel":
-                if not is_y_axis:
-                    return True # 南北隧道内：禁止东西向移动（被隧道侧水泥墙挡住）
-                return False
-            return False
         return False
 
     def solve_path(self) -> list[tuple[int, int]]:
